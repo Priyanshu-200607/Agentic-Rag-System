@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Department Assistant</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            width: 100vw;
+            max-width: 100%;
+            font-family: sans-serif;
+            box-sizing: border-box;
+        }
+        #sidebar {
+            width: 250px;
+            background: #f0f0f0;
+            padding: 20px;
+            border-right: 1px solid #ccc;
+            display: flex;
+            flex-direction: column;
+        }
+        #main {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            background: #fafafa;
+        }
+        #header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        #messages {
+            flex: 1;
+            border: 1px solid #ddd;
+            padding: 10px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            background: #fff;
+            border-radius: 4px;
+        }
+        .input-area {
+            display: flex;
+        }
+        .input-area input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+        .input-area button {
+            padding: 10px 20px;
+            border: none;
+            background: #007bff;
+            color: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .history-list {
+            flex: 1;
+            overflow-y: auto;
+            margin-top: 10px;
+            background: #fff;
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .upload-area {
+            margin-bottom: 20px;
+        }
+        .upload-area button {
+            width: 100%;
+            margin-top: 10px;
+            padding: 10px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .upload-area input {
+            width: 100%;
+        }
+        .logout-btn {
+            padding: 8px 15px;
+            background: #dc3545;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <div id="adminUploadSection" style="display: none;">
+            <h3>Add Files</h3>
+            <div class="upload-area">
+                <select id="uploadDept" style="width: 100%; margin-bottom: 10px; padding: 5px;">
+                    <option value="hr">HR</option>
+                    <option value="finance">Finance</option>
+                    <option value="it">IT</option>
+                </select>
+                <input type="file" id="fileInput" multiple>
+                <button onclick="uploadFiles()">Upload</button>
+                <div id="uploadStatus" style="margin-top: 10px; font-size: 0.9em; color: #555;"></div>
+            </div>
+        </div>
+        
+        <h3>Upload History</h3>
+        <div class="history-list" id="historyList">
+            <!-- History items -->
+        </div>
+    </div>
+    <div id="main">
+        <div id="header">
+            <h1 id="deptTitle">Assistant</h1>
+            <a href="login.html" class="logout-btn" onclick="logout()">Logout</a>
+        </div>
+        <div id="messages"></div>
+        <div class="input-area">
+            <input id="question" placeholder="Ask a question..." onkeypress="handleEnter(event)">
+            <button onclick="sendQuestion()">Send</button>
+        </div>
+    </div>
+
+    <script src="js/chat.js"></script>
+</body>
+</html>

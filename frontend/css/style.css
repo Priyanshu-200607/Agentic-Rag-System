@@ -1,0 +1,39 @@
+body {
+    font-family: sans-serif;
+    width: 700px;
+    margin: auto;
+    padding-top: 50px;
+}
+
+#messages {
+    height: 500px;
+    overflow-y: auto;
+    border: 1px solid gray;
+    padding: 20px;
+    margin-bottom: 20px;
+    background: #f9f9f9;
+}
+
+input {
+    width: 80%;
+    padding: 10px;
+}
+
+button {
+    width: 18%;
+    padding: 10px;
+}
+
+.login-container {
+    text-align: center;
+}
+
+.login-container input {
+    display: block;
+    margin: 10px auto;
+    width: 50%;
+}
+
+.login-container button {
+    width: 30%;
+}

@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environments
+env/
+venv/
+.venv/
+ENV/
+backend/env/
+
+# Environment Variables
+.env
+.env.*
+
+# ChromaDB / Vector Database
+backend/chroma_db_multi/
+
+# Runtime files
+backend/history.json
+
+# Uploaded documents (remove this if uploads are your source documents)
+backend/uploads/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+report.md
