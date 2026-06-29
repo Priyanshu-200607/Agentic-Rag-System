@@ -1,32 +1,29 @@
-import os
+import json
 from sentence_transformers import SentenceTransformer
-from ollama import chat
-from pypdf import PdfReader
-from docx import Document
 import chromadb
+from ollama import chat
+
+from document_processor import process_file
+from department_agent import DepartmentAgent
+from kg_system import KnowledgeGraph
 
 class MultiDeptRAG:
+    """Master Agent / Orchestrator for Multi-Department RAG"""
     def __init__(self, db_path="./chroma_db_multi", embed_model_name="BAAI/bge-small-en-v1.5", llm_model_name="gemma2:2b"):
-        print("Loading embedding model...")
+        print("Initializing Agentic Orchestrator System...")
         self.embed_model = SentenceTransformer(embed_model_name)
         self.client = chromadb.PersistentClient(path=db_path)
         self.llm_model_name = llm_model_name
-        print("System initialized.")
+        self.agents = {}
+        self.kg = KnowledgeGraph()
+        print("Master Agent and Department Agents ready.")
 
-    def _process_file(self, path):
-        ext = os.path.splitext(path)[1].lower()
-        if ext == ".txt":
-            with open(path, "r", encoding="utf-8") as f:
-                return f.read()
-        elif ext == ".pdf":
-            reader = PdfReader(path)
-            return "\n".join(page.extract_text() or "" for page in reader.pages)
-        elif ext == ".docx":
-            doc = Document(path)
-            return "\n".join(para.text for para in doc.paragraphs)
-        else:
-            print(f"Unsupported file: {path}")
-            return ""
+    def get_agent(self, department_name):
+        if department_name not in self.agents:
+            self.agents[department_name] = DepartmentAgent(
+                department_name, self.client, self.embed_model, self.llm_model_name, self.kg
+            )
+        return self.agents[department_name]
 
     def admin_upload_to_department(self, department_name, file_paths, chunk_size=500, overlap=100):
         safe_name = f"dept_{department_name}" if len(department_name) < 3 else department_name
@@ -38,7 +35,7 @@ class MultiDeptRAG:
         
         for path in file_paths:
             path = path.strip()
-            text = self._process_file(path)
+            text = process_file(path)
             if not text:
                 continue
             for i in range(0, len(text), step):
@@ -47,77 +44,102 @@ class MultiDeptRAG:
                     documents.append(chunk)
                     metadatas.append({"source": path, "department": department_name})
                     
-        if not documents:
-            return
-        embeddings = self.embed_model.encode(documents, show_progress_bar=True).tolist()
-        existing_count = collection.count()
-        ids = [str(existing_count + i) for i in range(len(documents))]
-        
-        collection.add(
-            ids=ids,
-            documents=documents,
-            embeddings=embeddings,
-            metadatas=metadatas
-        )
+        if documents:
+            embeddings = self.embed_model.encode(documents, show_progress_bar=True).tolist()
+            start_id = collection.count()
+            ids = [str(start_id + i) for i in range(len(documents))]
+            
+            batch_size = 5000
+            for i in range(0, len(documents), batch_size):
+                collection.add(
+                    ids=ids[i:i+batch_size],
+                    documents=documents[i:i+batch_size],
+                    embeddings=embeddings[i:i+batch_size],
+                    metadatas=metadatas[i:i+batch_size]
+                )
+            
+            print(f"Extracting Knowledge Graph facts from {len(documents)} chunks...")
+            # Limiting to first 100 chunks for performance, can be expanded to background workers later
+            for doc in documents[:100]:
+                self.kg.extract_from_text(doc, self.llm_model_name)
+            print("Knowledge Graph extraction complete!")
 
     def admin_delete_file(self, department_name, file_path):
         safe_name = f"dept_{department_name}" if len(department_name) < 3 else department_name
         try:
-            collection = self.client.get_collection(name=safe_name)
-            collection.delete(where={"source": file_path})
-            print(f"Deleted chunks for {file_path} from department '{department_name}'")
+            self.client.get_collection(name=safe_name).delete(where={"source": file_path})
         except Exception:
-            print(f"Collection {safe_name} does not exist.")
+            pass
 
-    def query(self, query, target_departments, n_results=3, distance_threshold=1.2):
-        query_embedding = self.embed_model.encode(query).tolist()
-        all_retrieved = []
-        for dept in target_departments:
-            safe_name = f"dept_{dept}" if len(dept) < 3 else dept
-            try:
-                collection = self.client.get_collection(name=safe_name)
-                results = collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=n_results,
-                    include=["documents", "distances"]
-                )
-                if results["documents"] and len(results["documents"]) > 0:
-                    docs = results["documents"][0]
-                    distances = results["distances"][0]
-                    for doc, dist in zip(docs, distances):
-                        if dist <= distance_threshold:
-                            all_retrieved.append((dist, doc, dept))
-            except Exception:
-                pass
-                
-        all_retrieved.sort(key=lambda x: x[0])
-        top_matches = all_retrieved[:n_results]
-        
-        if not top_matches:
-            return "No relevant information found in the specified departments."
-
-        context = "\n\n".join([doc for dist, doc, dept in top_matches])
+    def route_query(self, query, allowed_departments):
         prompt = f"""
-Answer ONLY from the context.
-If the answer cannot be found in the context, reply exactly with:
-I don't know that.
+        You are a routing assistant. Decide which departments should be queried based on the query.
+        Available departments: {', '.join(allowed_departments)}
 
-Context:
-{context}
+        Query: {query}
 
-Question:
-{query}
-
-Answer:
-"""
+        Return ONLY a valid JSON list of department names.
+        """
         response = chat(
             model=self.llm_model_name,
             messages=[{"role": "user", "content": prompt}]
         )
-        return response.message.content
+        
+        try:
+            content = response.message.content
+            start, end = content.find("["), content.find("]") + 1
+            if start != -1 and end != -1:
+                return [d for d in json.loads(content[start:end]) if d in allowed_departments]
+        except Exception:
+            pass
+        return allowed_departments
 
-    def department_query(self, question, department):
-        return self.query(
-            query=question,
-            target_departments=[department]
+    def process_request(self, query, username):
+        from auth import load_db
+        db = load_db()
+        
+        if username not in db["users"]:
+            return "Access Denied: User not found."
+            
+        user = db["users"][username]
+        if user.get("status") == "suspended":
+            return "Access Denied: Your account is suspended."
+            
+        allowed_departments = user.get("allowed_departments", [])
+        if not allowed_departments:
+            return "Access Denied: You do not have permission for any departments."
+
+        target_departments = self.route_query(query, allowed_departments)
+        
+        active_target_departments = [
+            dept for dept in target_departments 
+            if dept in db.get("departments", {}) and db["departments"][dept].get("status", "active") == "active"
+        ]
+        
+        if not active_target_departments:
+            return "Query blocked: The requested departments are currently suspended or offline."
+
+        agent_responses = {
+            dept: self.get_agent(dept).query(query) 
+            for dept in active_target_departments
+        }
+
+        synthesis_prompt = f"""
+        You are a Master Agent. Synthesize a unified, coherent response to the user's query based on the department agents' answers.
+        If all agents say they don't know, just tell the user you don't have the information. Do not mention agents in the final response.
+        You are strictly forbidden from answering the user's query using your own knowledge. You must ONLY formulate an answer using the provided Responses. If the responses contain 'I don't know', you must also say 'I don't know'.
+
+        User Query: {query}
+
+        Responses:
+        """
+        for dept, resp in agent_responses.items():
+            synthesis_prompt += f"\n- {dept.upper()}: {resp}"
+
+        synthesis_prompt += "\n\nSynthesized Final Answer:"
+
+        final_response = chat(
+            model=self.llm_model_name,
+            messages=[{"role": "user", "content": synthesis_prompt}]
         )
+        return final_response.message.content

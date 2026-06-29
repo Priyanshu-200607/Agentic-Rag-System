@@ -16,9 +16,10 @@ async function login() {
     const data = await response.json();
 
     if(data.success) {
-        localStorage.setItem('department', data.role);
+        localStorage.setItem('username', data.username);
+        localStorage.setItem('role', data.role);
         window.location.href = 'chat.html';
     } else {
-        alert("Login failed! Invalid credentials.");
+        alert(data.message || "Login failed! Invalid credentials.");
     }
 }

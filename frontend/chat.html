@@ -1,134 +1,384 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Department Assistant</title>
+    <title>Enterprise Assistant</title>
     <link rel="stylesheet" href="css/style.css">
     <style>
+        * { box-sizing: border-box; }
+
         body {
             margin: 0;
             padding: 0;
             display: flex;
             height: 100vh;
             width: 100vw;
-            max-width: 100%;
-            font-family: sans-serif;
-            box-sizing: border-box;
+            font-family: 'Segoe UI', sans-serif;
+            background: #f4f6f9;
+            overflow: hidden;
         }
+
+        /* ── Sidebar ── */
         #sidebar {
-            width: 250px;
-            background: #f0f0f0;
+            width: 260px;
+            min-width: 260px;
+            background: #fff;
             padding: 20px;
-            border-right: 1px solid #ccc;
+            border-right: 1px solid #e0e0e0;
             display: flex;
             flex-direction: column;
+            overflow-y: auto;
         }
+        #sidebar h3 {
+            margin: 0 0 10px 0;
+            font-size: 0.85em;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #888;
+        }
+        
+        .nav-btn {
+            width: 100%;
+            text-align: left;
+            padding: 10px 15px;
+            margin-bottom: 8px;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.95em;
+            font-weight: 600;
+            color: #444;
+            transition: all 0.2s;
+        }
+        .nav-btn:hover { background: #f0f0f0; }
+        .nav-btn.active { background: #e6f0ff; color: #007bff; border-color: #b3d4ff; }
+
+        .upload-area { margin-bottom: 20px; }
+        .upload-area input[type="text"] {
+            width: 100%;
+            padding: 8px 10px;
+            margin-bottom: 8px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 0.9em;
+        }
+        .upload-area input[type="file"] { width: 100%; font-size: 0.85em; }
+        .upload-area button {
+            width: 100%;
+            margin-top: 8px;
+            padding: 9px;
+            background: #28a745;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: 600;
+        }
+        .upload-area button:hover { background: #218838; }
+        .history-list {
+            flex: 1;
+            overflow-y: auto;
+            background: #fafafa;
+            border: 1px solid #e8e8e8;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 0.85em;
+        }
+
+        /* ── Main Area ── */
         #main {
             flex: 1;
-            padding: 20px;
             display: flex;
             flex-direction: column;
-            background: #fafafa;
+            overflow: hidden;
+            position: relative;
         }
+
+        /* ── Common Header ── */
         #header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
-        }
-        #messages {
-            flex: 1;
-            border: 1px solid #ddd;
-            padding: 10px;
-            overflow-y: auto;
-            margin-bottom: 20px;
             background: #fff;
-            border-radius: 4px;
+            padding: 14px 24px;
+            border-bottom: 1px solid #e0e0e0;
+            gap: 16px;
         }
-        .input-area {
+        #deptTitle {
+            margin: 0;
+            font-size: 1.15em;
+            font-weight: 600;
+            color: #333;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .header-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        .btn {
+            padding: 8px 18px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.88em;
+            font-weight: 600;
+            white-space: nowrap;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+        }
+        .btn-logout { background: #dc3545; color: #fff; }
+        .btn-logout:hover { background: #b02a37; }
+
+        /* ── Panels ── */
+        .panel {
+            flex: 1;
+            display: none; /* hidden by default */
+            flex-direction: column;
+            padding: 24px;
+            overflow: hidden;
+        }
+        .panel.active {
             display: flex;
         }
+
+        /* ── Chat Panel ── */
+        #messages {
+            flex: 1;
+            border: 1px solid #e0e0e0;
+            padding: 16px;
+            overflow-y: auto;
+            margin-bottom: 16px;
+            background: #fff;
+            border-radius: 10px;
+        }
+        .input-area { display: flex; gap: 10px; }
         .input-area input {
             flex: 1;
-            padding: 10px;
+            padding: 11px 14px;
             border: 1px solid #ccc;
-            border-radius: 4px;
-            margin-right: 10px;
+            border-radius: 8px;
+            font-size: 0.95em;
         }
         .input-area button {
-            padding: 10px 20px;
+            padding: 11px 24px;
             border: none;
             background: #007bff;
             color: #fff;
-            border-radius: 4px;
+            border-radius: 8px;
             cursor: pointer;
+            font-weight: 600;
         }
-        .history-list {
-            flex: 1;
+        .input-area button:hover { background: #0056b3; }
+
+        /* ── Admin Dashboard Panel ── */
+        #adminPanel {
             overflow-y: auto;
-            margin-top: 10px;
+        }
+        .admin-content {
             background: #fff;
+            padding: 32px;
+            border-radius: 12px;
+            max-width: 1000px;
+            margin: 0 auto;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+            width: 100%;
+        }
+
+        .modal-header {
+            margin-bottom: 28px;
+            padding-bottom: 16px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        .modal-header h2 { margin: 0; font-size: 1.5em; color: #222; }
+
+        .modal-section-title {
+            font-size: 1.1em;
+            font-weight: 700;
+            color: #444;
+            margin: 28px 0 16px 0;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .form-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 16px;
+            align-items: center;
+        }
+        .form-row input, .form-row select {
+            flex: 1;
+            min-width: 120px;
+            padding: 9px 11px;
             border: 1px solid #ccc;
-            padding: 10px;
-            border-radius: 4px;
+            border-radius: 6px;
+            font-size: 0.9em;
         }
-        .upload-area {
-            margin-bottom: 20px;
-        }
-        .upload-area button {
-            width: 100%;
-            margin-top: 10px;
-            padding: 10px;
-            background: #28a745;
-            color: white;
+
+        .modal-btn {
+            padding: 9px 16px;
             border: none;
-            border-radius: 4px;
+            border-radius: 6px;
             cursor: pointer;
+            font-size: 0.88em;
+            font-weight: 600;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
-        .upload-area input {
-            width: 100%;
+        .modal-btn-primary   { background: #007bff; color: #fff; }
+        .modal-btn-success   { background: #28a745; color: #fff; }
+        .modal-btn-danger    { background: #dc3545; color: #fff; }
+        .modal-btn-warning   { background: #ffc107; color: #333; }
+        .modal-btn-info      { background: #17a2b8; color: #fff; }
+        .modal-btn:hover { opacity: 0.88; }
+
+        .table-wrap { overflow-x: auto; margin-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+        th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            border-bottom: 2px solid #dee2e6;
+            font-weight: 700;
+            color: #555;
+            font-size: 0.85em;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
         }
-        .logout-btn {
-            padding: 8px 15px;
-            background: #dc3545;
-            color: white;
-            text-decoration: none;
-            border-radius: 4px;
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #f0f0f0;
+            vertical-align: middle;
+            color: #333;
         }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #fafbff; }
+
+        .action-cell {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: nowrap;
+        }
+        .access-cell {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .access-cell input {
+            width: 150px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: 700;
+        }
+        .badge-active { background: #d4edda; color: #155724; }
+        .badge-suspended { background: #f8d7da; color: #721c24; }
     </style>
 </head>
 <body>
+    <!-- ── Sidebar ── -->
     <div id="sidebar">
+        <div id="adminNavSection" style="display: none; margin-bottom: 24px;">
+            <h3>Menu</h3>
+            <button class="nav-btn active" id="navChatBtn" onclick="showChat()">💬 Chat Assistant</button>
+            <button class="nav-btn" id="navAdminBtn" onclick="showDashboard()">⚙️ Admin Dashboard</button>
+        </div>
+
         <div id="adminUploadSection" style="display: none;">
-            <h3>Add Files</h3>
+            <h3>Upload Files</h3>
             <div class="upload-area">
-                <select id="uploadDept" style="width: 100%; margin-bottom: 10px; padding: 5px;">
-                    <option value="hr">HR</option>
-                    <option value="finance">Finance</option>
-                    <option value="it">IT</option>
+                <select id="uploadDept" style="width: 100%; padding: 8px 10px; margin-bottom: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 0.9em; background: #fff;">
+                    <option value="" disabled selected>Select Department...</option>
                 </select>
                 <input type="file" id="fileInput" multiple>
-                <button onclick="uploadFiles()">Upload</button>
-                <div id="uploadStatus" style="margin-top: 10px; font-size: 0.9em; color: #555;"></div>
+                <button onclick="uploadFiles()">⬆ Upload</button>
+                <div id="uploadStatus" style="margin-top: 8px; font-size: 0.85em;"></div>
             </div>
         </div>
-        
+
         <h3>Upload History</h3>
-        <div class="history-list" id="historyList">
-            <!-- History items -->
-        </div>
+        <div class="history-list" id="historyList"></div>
     </div>
+
+    <!-- ── Main ── -->
     <div id="main">
         <div id="header">
-            <h1 id="deptTitle">Assistant</h1>
-            <a href="login.html" class="logout-btn" onclick="logout()">Logout</a>
+            <h1 id="deptTitle">Enterprise Assistant</h1>
+            <div class="header-actions">
+                <a href="login.html" class="btn btn-logout" onclick="logout()">Logout</a>
+            </div>
         </div>
-        <div id="messages"></div>
-        <div class="input-area">
-            <input id="question" placeholder="Ask a question..." onkeypress="handleEnter(event)">
-            <button onclick="sendQuestion()">Send</button>
+
+        <!-- Chat Panel -->
+        <div id="chatPanel" class="panel active">
+            <div id="messages"></div>
+
+            <div class="input-area">
+                <input id="question" placeholder="Ask a question..." onkeypress="handleEnter(event)">
+                <button onclick="sendQuestion()">Send</button>
+            </div>
+        </div>
+
+        <!-- Admin Dashboard Panel -->
+        <div id="adminPanel" class="panel">
+            <div class="admin-content">
+                <div class="modal-header">
+                    <h2>⚙️ Admin Dashboard</h2>
+                </div>
+
+                <!-- Departments -->
+                <div class="modal-section-title">Departments</div>
+                <div class="form-row">
+                    <input id="newDeptInput" placeholder="New department name (e.g. sales)">
+                    <button class="modal-btn modal-btn-success" onclick="addDepartment()">+ Create Department</button>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Department</th><th>Status</th><th>Action</th></tr></thead>
+                        <tbody id="deptTableBody"></tbody>
+                    </table>
+                </div>
+
+                <!-- Users -->
+                <div class="modal-section-title">Users</div>
+                <div class="form-row">
+                    <input id="newUsername" placeholder="Username">
+                    <input id="newPassword" placeholder="Password">
+                    <select id="newRole">
+                        <option value="employee">Employee</option>
+                        <option value="manager">Manager</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                    <input id="newAccess" placeholder="Access depts (e.g. hr,it)" style="flex: 2;">
+                    <button class="modal-btn modal-btn-success" onclick="addUser()">+ Create User</button>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Username</th><th>Role</th><th>Access</th><th>Status</th><th>Actions</th></tr></thead>
+                        <tbody id="usersTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
 
-    <script src="js/chat.js"></script>
+    <script src="js/chat.js?v=4"></script>
 </body>
 </html>

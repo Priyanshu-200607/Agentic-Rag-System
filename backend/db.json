@@ -1,0 +1,85 @@
+{
+    "users": {
+        "admin": {
+            "password": "123",
+            "role": "admin",
+            "status": "active",
+            "allowed_departments": [
+                "hr",
+                "finance",
+                "it"
+            ]
+        },
+        "manager": {
+            "password": "123",
+            "role": "manager",
+            "status": "active",
+            "allowed_departments": [
+                "hr",
+                "finance",
+                "it"
+            ]
+        },
+        "hr1": {
+            "password": "123",
+            "role": "employee",
+            "status": "active",
+            "allowed_departments": [
+                "hr",
+                "it"
+            ]
+        },
+        "hr2": {
+            "password": "123",
+            "role": "employee",
+            "status": "active",
+            "allowed_departments": [
+                "hr",
+                "finance"
+            ]
+        },
+        "it1": {
+            "password": "123",
+            "role": "employee",
+            "status": "active",
+            "allowed_departments": [
+                "it"
+            ]
+        },
+        "it2": {
+            "password": "123",
+            "role": "employee",
+            "status": "active",
+            "allowed_departments": [
+                "it"
+            ]
+        },
+        "fin1": {
+            "password": "123",
+            "role": "employee",
+            "status": "active",
+            "allowed_departments": [
+                "finance"
+            ]
+        },
+        "fin2": {
+            "password": "123",
+            "role": "employee",
+            "status": "active",
+            "allowed_departments": [
+                "finance"
+            ]
+        }
+    },
+    "departments": {
+        "hr": {
+            "status": "active"
+        },
+        "finance": {
+            "status": "active"
+        },
+        "it": {
+            "status": "active"
+        }
+    }
+}

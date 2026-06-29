@@ -3,14 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from rag_system import MultiDeptRAG
-from models import Question, Upload, Login
-from auth import users
+from models import Question, Upload, Login, UserCreate, AccessUpdate
+from auth import load_db, save_db
 import os
 import json
 
 app = FastAPI()
 
-# Enable CORS for the frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,22 +23,25 @@ system = MultiDeptRAG()
 
 @app.post("/login")
 def login(req: Login):
-    if req.username not in users:
-        return {"success": False}
-    user = users[req.username]
+    db = load_db()
+    if req.username not in db["users"]:
+        return {"success": False, "message": "User not found"}
+    user = db["users"][req.username]
     if req.password != user["password"]:
-        return {"success": False}
+        return {"success": False, "message": "Incorrect password"}
+    if user.get("status") == "suspended":
+        return {"success": False, "message": "Account suspended"}
     return {
         "success": True,
+        "username": req.username,
         "role": user["role"]
     }
 
-@app.post("/chat/{department}")
-def chat(department: str, req: Question):
-    target_depts = ["hr", "finance", "it"] if department == "admin" else [department]
-    answer = system.query(
+@app.post("/chat")
+def chat(req: Question):
+    answer = system.process_request(
         req.question,
-        target_depts
+        username=req.username
     )
     return {"answer": answer}
 
@@ -59,6 +61,11 @@ uploaded_files_history = load_history()
 
 @app.post("/upload")
 async def upload(department: str = Form(...), files: list[UploadFile] = File(...)):
+    db = load_db()
+    if department not in db["departments"]:
+        db["departments"][department] = {"status": "active"}
+        save_db(db)
+        
     os.makedirs("uploads", exist_ok=True)
     saved_paths = []
     for file in files:
@@ -94,6 +101,70 @@ def delete_file(department: str, filename: str):
     save_history(uploaded_files_history)
     
     return {"status": "success"}
+
+# --- Admin Endpoints ---
+@app.get("/admin/users")
+def get_users():
+    return load_db()["users"]
+
+@app.post("/admin/users")
+def create_user(req: UserCreate):
+    db = load_db()
+    db["users"][req.username] = {
+        "password": req.password,
+        "role": req.role,
+        "status": "active",
+        "allowed_departments": req.allowed_departments
+    }
+    save_db(db)
+    return {"status": "success"}
+
+@app.delete("/admin/users/{username}")
+def delete_user(username: str):
+    db = load_db()
+    if username in db["users"]:
+        del db["users"][username]
+        save_db(db)
+    return {"status": "success"}
+
+@app.put("/admin/users/{username}/suspend")
+def toggle_suspend_user(username: str):
+    db = load_db()
+    if username in db["users"]:
+        current = db["users"][username].get("status", "active")
+        db["users"][username]["status"] = "suspended" if current == "active" else "active"
+        save_db(db)
+    return {"status": "success"}
+
+@app.put("/admin/users/{username}/access")
+def update_user_access(username: str, req: AccessUpdate):
+    db = load_db()
+    if username in db["users"]:
+        db["users"][username]["allowed_departments"] = req.allowed_departments
+        save_db(db)
+    return {"status": "success"}
+
+@app.get("/admin/departments")
+def get_departments():
+    return load_db()["departments"]
+
+@app.post("/admin/departments/{name}")
+def create_department(name: str):
+    db = load_db()
+    if name not in db["departments"]:
+        db["departments"][name] = {"status": "active"}
+        save_db(db)
+    return {"status": "success"}
+
+@app.put("/admin/departments/{name}/suspend")
+def toggle_suspend_department(name: str):
+    db = load_db()
+    if name in db["departments"]:
+        current = db["departments"][name].get("status", "active")
+        db["departments"][name]["status"] = "suspended" if current == "active" else "active"
+        save_db(db)
+    return {"status": "success"}
+
 
 @app.get("/")
 def root():

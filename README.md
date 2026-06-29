@@ -1,51 +1,58 @@
 # Multi-Department RAG System
 
-A Retrieval-Augmented Generation (RAG) system designed for enterprise use. It allows different departments (HR, IT, Finance, etc.) to securely maintain their own knowledge bases and enables users to query across these isolated data stores.
+A Retrieval-Augmented Generation (RAG) system designed for enterprise use. It allows different departments (HR, IT, Finance, etc.) to securely maintain their own knowledge bases, while an intelligent agent dynamically routes user queries to the correct departments based on their access level.
 
-##  Current Stage & Roadmap
+## System Architecture: The Agentic Orchestrator
 
-**Status:** Transitioning from MVP to an Agentic Orchestrator Architecture.
+The system operates using a lightweight, modular **Agentic Orchestrator** architecture written in pure Python (no heavy frameworks required):
 
-Currently, the system uses a basic FastAPI backend with hard-coded endpoints (`/chat/{department}`) and synchronous document ingestion. 
+1. **Master Agent (Orchestrator)**: 
+   - Acts as the central traffic controller.
+   - **Access Control (RBAC)**: Checks the user's role to ensure they are allowed to access the requested data.
+   - **Intelligent Routing**: Uses an LLM to analyze the user's query and automatically determines which departments hold the relevant information.
+   - **Synthesis**: Collects answers from multiple departments and merges them into a single, cohesive response.
+   
+2. **Department Agents**:
+   - Each department (e.g., HR, IT) is represented by its own autonomous agent.
+   - Operates on a fully isolated Vector Database (ChromaDB collection).
+   - Only searches its own secure data and summarizes the findings independently before reporting back to the Master Agent.
 
-We are actively migrating to a robust **Agentic Orchestrator System** which will feature:
-*   **Master Orchestrator Agent**: A central agent to handle query intent, dynamic routing, and data synthesis.
-*   **Role-Based Access Control (RBAC)**: Strict data isolation based on user metadata.
-*   **Intelligent Ingestion Pipeline**: Asynchronous batch processing with semantic chunking and enterprise-grade format parsers (e.g., Unstructured.io).
-*   **Dual-Track Retrieval**: Integrating Knowledge Graphs (e.g., Neo4j) alongside our current Vector DB (ChromaDB) to manage complex entity relationships.
-*   **LangGraph Workflows**: Moving away from static code paths to graph-based agent decision making.
+*Note: For the original architectural proposal, see [report.md](report.md).*
 
-For full details on the planned architecture, please read the [Architecture Report](report.md).
+## Key Features
+* **Zero Hard-Coded Routing**: You don't need to manually tell the system where to search. The Master Agent figures out if a question belongs to HR, IT, or multiple departments at once.
+* **Granular Security**: Built-in Role-Based Access Control (RBAC) ensures users (like interns) cannot access sensitive data (like Finance) even if they ask for it.
+* **Modular Backend**: Clean, separated code structure (`rag_system.py`, `department_agent.py`, `document_processor.py`, `auth.py`) for easy debugging and upgrading.
+* **Local Privacy**: Runs entirely locally using `ollama` and `ChromaDB`.
 
-##  Key Features (Current)
-*   **Multi-Department Vector Stores**: Separate ChromaDB collections for each department.
-*   **Access Control**: Basic login simulating user roles.
-*   **File Uploads**: Admin endpoints to ingest PDF, DOCX, and TXT files.
-*   **Local LLM Integration**: Uses `ollama` for fast, localized question answering.
+## Tech Stack
+* **Backend**: FastAPI, Python
+* **AI/ML**: SentenceTransformers (Embeddings), Ollama (Local LLMs)
+* **Database**: ChromaDB (Persistent Local Vector DB)
+* **Frontend**: Vanilla HTML/JS (Static files served via FastAPI)
 
-##  Tech Stack
-*   **Backend**: FastAPI, Python
-*   **AI/ML**: SentenceTransformers, Ollama (Local LLMs)
-*   **Database**: ChromaDB (Persistent Vector DB)
-*   **Frontend**: Vanilla HTML/JS (Static files served via FastAPI)
-
-##  Getting Started
+## Getting Started
 
 ### Prerequisites
 * Python 3.9+
-* [Ollama](https://ollama.com/) installed and running locally with your chosen model.
+* [Ollama](https://ollama.com/) installed and running locally with your chosen model (default is `gemma2:2b`).
 
 ### Installation
-1. Install Python dependencies:
+1. Install Python dependencies using the provided virtual environment:
    ```bash
    cd backend
    python -m venv env
-   source env/bin/avtivate
+   source env/bin/activate
    pip install -r requirements.txt
    ```
 2. Start the FastAPI server:
    ```bash
-   source env/bin/activate
+   # Ensure you are still in the backend folder and your virtual environment is activated
    uvicorn api:app --reload
    ```
 3. Open your browser and navigate to: `http://localhost:8000`
+
+### Testing the App
+1. Log in as `admin` (password: `123`) to get upload permissions.
+2. Use the left sidebar to upload `.txt`, `.pdf`, or `.docx` files to specific departments (HR, Finance, IT).
+3. Log out and log back in as different roles (e.g., `intern` or `hr_guy`) to test the Master Agent's security and intelligent routing!
