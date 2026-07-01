@@ -1,7 +1,12 @@
 import json
 import os
+import threading
 
 DB_FILE = "db.json"
+
+# Fix #3 (db race condition): A single process-level lock so no two
+# concurrent FastAPI requests can read-modify-write db.json simultaneously.
+_db_lock = threading.Lock()
 
 DEFAULT_DB = {
     "users": {
@@ -22,11 +27,20 @@ DEFAULT_DB = {
 }
 
 def load_db():
-    if not os.path.exists(DB_FILE):
-        save_db(DEFAULT_DB)
-    with open(DB_FILE, "r") as f:
-        return json.load(f)
+    with _db_lock:
+        if not os.path.exists(DB_FILE):
+            _write_db_unsafe(DEFAULT_DB)
+        with open(DB_FILE, "r") as f:
+            return json.load(f)
 
 def save_db(data):
-    with open(DB_FILE, "w") as f:
+    with _db_lock:
+        _write_db_unsafe(data)
+
+def _write_db_unsafe(data):
+    """Write db.json atomically using a temp file swap to prevent partial-write corruption."""
+    tmp_path = DB_FILE + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(data, f, indent=4)
+    # Atomic rename — on Linux this is guaranteed to be atomic
+    os.replace(tmp_path, DB_FILE)

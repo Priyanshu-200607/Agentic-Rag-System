@@ -50,3 +50,9 @@ dist/
 .DS_Store
 Thumbs.db
 report.md
+
+# Knowledge Graph DB
+backend/knowledge_graph.db
+
+# Side stuff
+side stuff/

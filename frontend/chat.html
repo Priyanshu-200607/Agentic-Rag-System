@@ -20,13 +20,15 @@
         /* ── Sidebar ── */
         #sidebar {
             width: 260px;
-            min-width: 260px;
+            min-width: 200px;
+            max-width: 600px;
             background: #fff;
             padding: 20px;
             border-right: 1px solid #e0e0e0;
             display: flex;
             flex-direction: column;
             overflow-y: auto;
+            resize: horizontal;
         }
         #sidebar h3 {
             margin: 0 0 10px 0;
@@ -222,16 +224,23 @@
             border-radius: 6px;
             font-size: 0.9em;
         }
+        /* Buttons in form-row must never shrink or wrap their text */
+        .form-row .modal-btn {
+            flex-shrink: 0;
+            width: auto;
+        }
 
         .modal-btn {
-            padding: 9px 16px;
+            padding: 9px 18px;
             border: none;
+            min-width: 80px;
             border-radius: 6px;
             cursor: pointer;
             font-size: 0.88em;
             font-weight: 600;
             white-space: nowrap;
             flex-shrink: 0;
+            text-align: center;
         }
         .modal-btn-primary   { background: #007bff; color: #fff; }
         .modal-btn-success   { background: #28a745; color: #fff; }
@@ -253,6 +262,10 @@
             text-transform: uppercase;
             letter-spacing: 0.04em;
         }
+        /* Ensure action columns always have enough room */
+        th:last-child, td:last-child {
+            min-width: 180px;
+        }
         td {
             padding: 12px;
             border-bottom: 1px solid #f0f0f0;
@@ -266,7 +279,8 @@
             display: flex;
             gap: 8px;
             align-items: center;
-            flex-wrap: nowrap;
+            flex-wrap: wrap;
+            min-width: 160px;
         }
         .access-cell {
             display: flex;
@@ -312,6 +326,9 @@
                 <div id="uploadStatus" style="margin-top: 8px; font-size: 0.85em;"></div>
             </div>
         </div>
+
+        <h3>My Access</h3>
+        <div id="userAccessList" style="margin-bottom: 24px; display: flex; flex-wrap: wrap; gap: 5px;"></div>
 
         <h3>Upload History</h3>
         <div class="history-list" id="historyList"></div>
@@ -379,6 +396,6 @@
         </div>
     </div>
 
-    <script src="js/chat.js?v=4"></script>
+    <script src="js/chat.js?v=8"></script>
 </body>
 </html>

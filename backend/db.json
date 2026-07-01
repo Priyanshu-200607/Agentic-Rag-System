@@ -25,8 +25,7 @@
             "role": "employee",
             "status": "active",
             "allowed_departments": [
-                "hr",
-                "it"
+                "hr"
             ]
         },
         "hr2": {
@@ -69,6 +68,14 @@
             "allowed_departments": [
                 "finance"
             ]
+        },
+        "sales1": {
+            "password": "123",
+            "role": "employee",
+            "status": "active",
+            "allowed_departments": [
+                "sales"
+            ]
         }
     },
     "departments": {
@@ -79,6 +86,9 @@
             "status": "active"
         },
         "it": {
+            "status": "active"
+        },
+        "sales": {
             "status": "active"
         }
     }

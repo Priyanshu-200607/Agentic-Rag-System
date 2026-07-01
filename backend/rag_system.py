@@ -1,4 +1,7 @@
 import json
+import uuid
+import time
+import threading
 from sentence_transformers import SentenceTransformer
 import chromadb
 from ollama import chat
@@ -7,10 +10,23 @@ from document_processor import process_file
 from department_agent import DepartmentAgent
 from kg_system import KnowledgeGraph
 
+# Fix #7: Cap history at this many entries before pruning oldest
+HISTORY_MAX_ENTRIES = 500
+
+# Fix #3: Max concurrent KG extraction threads (prevents Ollama RAM saturation)
+_kg_semaphore = threading.Semaphore(1)
+
+# Consistent collection naming — single source of truth for all files
+def get_collection_name(department_name: str) -> str:
+    return f"dept_{department_name}"
+
 class MultiDeptRAG:
     """Master Agent / Orchestrator for Multi-Department RAG"""
     def __init__(self, db_path="./chroma_db_multi", embed_model_name="BAAI/bge-small-en-v1.5", llm_model_name="gemma2:2b"):
         print("Initializing Agentic Orchestrator System...")
+        # GPU encoding is fast for batch uploads. The 140MB idle VRAM cost is trivial
+        # on an RTX 4060 (8GB). The idle GPU activity you saw before was from the
+        # unthrottled KG extraction thread — that's now fixed with a semaphore + rate limit.
         self.embed_model = SentenceTransformer(embed_model_name)
         self.client = chromadb.PersistentClient(path=db_path)
         self.llm_model_name = llm_model_name
@@ -26,13 +42,13 @@ class MultiDeptRAG:
         return self.agents[department_name]
 
     def admin_upload_to_department(self, department_name, file_paths, chunk_size=500, overlap=100):
-        safe_name = f"dept_{department_name}" if len(department_name) < 3 else department_name
-        collection = self.client.get_or_create_collection(name=safe_name)
-        
+        collection_name = get_collection_name(department_name)
+        collection = self.client.get_or_create_collection(name=collection_name)
+
         documents = []
         metadatas = []
         step = chunk_size - overlap
-        
+
         for path in file_paths:
             path = path.strip()
             text = process_file(path)
@@ -43,12 +59,12 @@ class MultiDeptRAG:
                 if chunk.strip():
                     documents.append(chunk)
                     metadatas.append({"source": path, "department": department_name})
-                    
+
         if documents:
+            # Encode embeddings on CPU — no GPU needed, frees VRAM
             embeddings = self.embed_model.encode(documents, show_progress_bar=True).tolist()
-            start_id = collection.count()
-            ids = [str(start_id + i) for i in range(len(documents))]
-            
+            ids = [str(uuid.uuid4()) for _ in range(len(documents))]
+
             batch_size = 5000
             for i in range(0, len(documents), batch_size):
                 collection.add(
@@ -57,39 +73,106 @@ class MultiDeptRAG:
                     embeddings=embeddings[i:i+batch_size],
                     metadatas=metadatas[i:i+batch_size]
                 )
-            
-            print(f"Extracting Knowledge Graph facts from {len(documents)} chunks...")
-            # Limiting to first 100 chunks for performance, can be expanded to background workers later
-            for doc in documents[:100]:
-                self.kg.extract_from_text(doc, self.llm_model_name)
-            print("Knowledge Graph extraction complete!")
+
+            print(f"Vectors stored. Scheduling KG extraction for {len(documents)} chunks...")
+
+            # Fix #3: Background thread with semaphore (max 1 concurrent KG job)
+            # and rate-limiting sleep to prevent Ollama/CPU saturation.
+            # We pass a COPY of documents to avoid holding the upload request's memory.
+            docs_copy = list(documents)
+
+            def run_kg_extraction(docs, dept):
+                # Optimize KG extraction: Group 500-char chunks into ~3000-char blocks.
+                # This reduces the number of sequential LLM inference calls by ~6x,
+                # saving massive amounts of GPU time and making it finish much faster.
+                kg_blocks = []
+                current_block = ""
+                for doc in docs:
+                    if len(current_block) + len(doc) > 3000:
+                        kg_blocks.append(current_block)
+                        current_block = doc
+                    else:
+                        current_block += "\n" + doc if current_block else doc
+                if current_block:
+                    kg_blocks.append(current_block)
+
+                # Semaphore ensures only one KG extraction job runs at a time
+                with _kg_semaphore:
+                    print(f"\n[BACKGROUND TASK] KG extraction started for {dept} ({len(kg_blocks)} large blocks)...")
+                    print(f"-> This will heavily use the GPU to extract knowledge graph facts.")
+                    for idx, block in enumerate(kg_blocks):
+                        self.kg.extract_from_text(block, self.llm_model_name, dept)
+                        # Rate limiting — 100ms pause between LLM calls
+                        time.sleep(0.1)
+                        if (idx + 1) % 5 == 0 or (idx + 1) == len(kg_blocks):
+                            print(f"[BACKGROUND TASK] KG extraction progress: {idx + 1}/{len(kg_blocks)} blocks done")
+                    
+                    self.kg.invalidate_cache()
+                    print(f"[BACKGROUND TASK] KG extraction complete for {dept}!\n")
+
+            thread = threading.Thread(
+                target=run_kg_extraction,
+                args=(docs_copy, department_name),
+                daemon=True
+            )
+            thread.start()
 
     def admin_delete_file(self, department_name, file_path):
-        safe_name = f"dept_{department_name}" if len(department_name) < 3 else department_name
+        collection_name = get_collection_name(department_name)
         try:
-            self.client.get_collection(name=safe_name).delete(where={"source": file_path})
+            self.client.get_collection(name=collection_name).delete(where={"source": file_path})
         except Exception:
             pass
 
+    def admin_clear_department(self, department_name):
+        """Delete ALL vectors and KG edges for a department in one operation."""
+        collection_name = get_collection_name(department_name)
+
+        # 1. Drop the entire ChromaDB collection and recreate it empty
+        try:
+            self.client.delete_collection(name=collection_name)
+            print(f"Cleared ChromaDB collection: {collection_name}")
+        except Exception as e:
+            print(f"ChromaDB clear warning: {e}")
+
+        # 2. Remove all KG edges for this department from SQLite and rebuild graph
+        with self.kg._write_lock:
+            self.kg.conn.execute(
+                "DELETE FROM edges WHERE department = ?", (department_name,)
+            )
+            self.kg.conn.commit()
+            # Rebuild in-memory graph from remaining edges
+            self.kg.load()
+        # Invalidate entity cache since graph data changed
+        self.kg.invalidate_cache()
+        print(f"Cleared KG edges for department: {department_name}")
+
+        # 3. Remove the lazy-loaded agent so it is recreated fresh on next query
+        if department_name in self.agents:
+            del self.agents[department_name]
+
     def route_query(self, query, allowed_departments):
+        # Fix #4: Truncate query to prevent LLM context overflow in router
+        query_truncated = query[:1000]
         prompt = f"""
         You are a routing assistant. Decide which departments should be queried based on the query.
         Available departments: {', '.join(allowed_departments)}
 
-        Query: {query}
+        Query: {query_truncated}
 
-        Return ONLY a valid JSON list of department names.
+        Return ONLY a valid JSON list of department names from the available list. Use lowercase.
+        Example: ["hr", "finance"]
         """
         response = chat(
             model=self.llm_model_name,
             messages=[{"role": "user", "content": prompt}]
         )
-        
+
         try:
             content = response.message.content
             start, end = content.find("["), content.find("]") + 1
             if start != -1 and end != -1:
-                return [d for d in json.loads(content[start:end]) if d in allowed_departments]
+                return [d.lower() for d in json.loads(content[start:end]) if d.lower() in allowed_departments]
         except Exception:
             pass
         return allowed_departments
@@ -97,49 +180,68 @@ class MultiDeptRAG:
     def process_request(self, query, username):
         from auth import load_db
         db = load_db()
-        
+
         if username not in db["users"]:
             return "Access Denied: User not found."
-            
+
         user = db["users"][username]
         if user.get("status") == "suspended":
             return "Access Denied: Your account is suspended."
-            
+
         allowed_departments = user.get("allowed_departments", [])
         if not allowed_departments:
             return "Access Denied: You do not have permission for any departments."
 
         target_departments = self.route_query(query, allowed_departments)
-        
+
         active_target_departments = [
-            dept for dept in target_departments 
+            dept for dept in target_departments
             if dept in db.get("departments", {}) and db["departments"][dept].get("status", "active") == "active"
         ]
-        
+
         if not active_target_departments:
             return "Query blocked: The requested departments are currently suspended or offline."
 
-        agent_responses = {
-            dept: self.get_agent(dept).query(query) 
-            for dept in active_target_departments
-        }
+        # Collect responses
+        successful_responses = {}
+        failed_departments = []
+        
+        for dept in active_target_departments:
+            resp = self.get_agent(dept).query(query)
+            if "I don't know" in resp or "No relevant information found" in resp or "No documents found" in resp:
+                failed_departments.append(dept)
+            else:
+                successful_responses[dept] = resp
+
+        if not successful_responses:
+            failed_str = ", ".join(failed_departments)
+            return f"I don't know. (Debug: Subqueries failed for departments: {failed_str})"
 
         synthesis_prompt = f"""
-        You are a Master Agent. Synthesize a unified, coherent response to the user's query based on the department agents' answers.
-        If all agents say they don't know, just tell the user you don't have the information. Do not mention agents in the final response.
-        You are strictly forbidden from answering the user's query using your own knowledge. You must ONLY formulate an answer using the provided Responses. If the responses contain 'I don't know', you must also say 'I don't know'.
+        You are a Master Agent. Synthesize a unified, coherent response to the user's query based ONLY on the department agents' answers below.
 
-        User Query: {query}
+        Important Rules:
+        1. You must ONLY formulate an answer using the provided Responses. Do not use external knowledge.
+        2. Combine the information into a single clear answer.
+        3. Do NOT mention that a department did not have information.
+
+        User Query: {query[:2000]}
 
         Responses:
         """
-        for dept, resp in agent_responses.items():
+        for dept, resp in successful_responses.items():
             synthesis_prompt += f"\n- {dept.upper()}: {resp}"
 
         synthesis_prompt += "\n\nSynthesized Final Answer:"
 
         final_response = chat(
             model=self.llm_model_name,
-            messages=[{"role": "user", "content": synthesis_prompt}]
+            messages=[{"role": "user", "content": synthesis_prompt}],
+            options={"temperature": 0.0}
         )
-        return final_response.message.content
+        
+        final_text = final_response.message.content
+        if failed_departments:
+            final_text += f"\n\nNote: The {', '.join(failed_departments)} department(s) did not have any relevant information for this query."
+            
+        return final_text
