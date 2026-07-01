@@ -82,30 +82,15 @@ class MultiDeptRAG:
             docs_copy = list(documents)
 
             def run_kg_extraction(docs, dept):
-                # Optimize KG extraction: Group 500-char chunks into ~3000-char blocks.
-                # This reduces the number of sequential LLM inference calls by ~6x,
-                # saving massive amounts of GPU time and making it finish much faster.
-                kg_blocks = []
-                current_block = ""
-                for doc in docs:
-                    if len(current_block) + len(doc) > 3000:
-                        kg_blocks.append(current_block)
-                        current_block = doc
-                    else:
-                        current_block += "\n" + doc if current_block else doc
-                if current_block:
-                    kg_blocks.append(current_block)
-
-                # Semaphore ensures only one KG extraction job runs at a time
+                # Process the raw 500-character chunks directly (prevents >512 token truncation for REBEL)
                 with _kg_semaphore:
-                    print(f"\n[BACKGROUND TASK] KG extraction started for {dept} ({len(kg_blocks)} large blocks)...")
-                    print(f"-> This will heavily use the GPU to extract knowledge graph facts.")
-                    for idx, block in enumerate(kg_blocks):
-                        self.kg.extract_from_text(block, self.llm_model_name, dept)
-                        # Rate limiting — 100ms pause between LLM calls
-                        time.sleep(0.1)
-                        if (idx + 1) % 5 == 0 or (idx + 1) == len(kg_blocks):
-                            print(f"[BACKGROUND TASK] KG extraction progress: {idx + 1}/{len(kg_blocks)} blocks done")
+                    print(f"\n[BACKGROUND TASK] KG extraction started for {dept} ({len(docs)} chunks)...")
+                    print(f"-> Extracting knowledge graph facts...")
+                    for idx, chunk in enumerate(docs):
+                        self.kg.extract_from_text(chunk, dept)
+                        
+                        if (idx + 1) % 50 == 0 or (idx + 1) == len(docs):
+                            print(f"[BACKGROUND TASK] KG extraction progress: {idx + 1}/{len(docs)} chunks done")
                     
                     self.kg.invalidate_cache()
                     print(f"[BACKGROUND TASK] KG extraction complete for {dept}!\n")

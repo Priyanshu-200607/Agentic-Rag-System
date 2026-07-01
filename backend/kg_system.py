@@ -20,6 +20,54 @@ PATTERNS = {
     "quarter":  re.compile(r"q([1-4])(?:\s+quarter)?", re.I),
 }
 
+# --- REBEL PIPELINE INTEGRATION ---
+_rebel_model = None
+_rebel_tokenizer = None
+
+def get_rebel():
+    global _rebel_model, _rebel_tokenizer
+    if _rebel_model is None:
+        from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+        import torch
+        print("\nLoading REBEL model for Knowledge Graph extraction (this may take a moment)...")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        _rebel_tokenizer = AutoTokenizer.from_pretrained("Babelscape/rebel-large")
+        _rebel_model = AutoModelForSeq2SeqLM.from_pretrained("Babelscape/rebel-large").to(device)
+    return _rebel_tokenizer, _rebel_model
+
+def parse_rebel_output(text):
+    relations = []
+    relation, subject, object_ = '', '', ''
+    text = text.strip()
+    current = 'x'
+    text_replaced = text.replace("<s>", "").replace("<pad>", "").replace("</s>", "")
+    for token in text_replaced.split():
+        if token == "<triplet>":
+            current = 't'
+            if relation != '':
+                relations.append({'head': subject.strip(), 'type': relation.strip(), 'tail': object_.strip()})
+                relation = ''
+            subject = ''
+        elif token == "<subj>":
+            current = 's'
+            if relation != '':
+                relations.append({'head': subject.strip(), 'type': relation.strip(), 'tail': object_.strip()})
+            object_ = ''
+        elif token == "<obj>":
+            current = 'o'
+            relation = ''
+        else:
+            if current == 't':
+                subject += ' ' + token
+            elif current == 's':
+                object_ += ' ' + token
+            elif current == 'o':
+                relation += ' ' + token
+    if subject != '' and relation != '' and object_ != '':
+        relations.append({'head': subject.strip(), 'type': relation.strip(), 'tail': object_.strip()})
+    return relations
+# ----------------------------------
+
 class KnowledgeGraph:
     def __init__(self):
         self.graph = nx.DiGraph()
@@ -97,27 +145,35 @@ class KnowledgeGraph:
                 self._index_node(source)
                 self._index_node(target)
 
-    def extract_from_text(self, text, llm_model_name, department_name="global"):
-        prompt = f"""
-        Extract relationships from the following text in the exact format:
-        SourceEntity | Relationship | TargetEntity
-        Do not output anything else. If there are no relationships, output nothing.
-
-        Text:
-        {text}
-        """
+    def extract_from_text(self, text, department_name="global"):
         try:
-            response = chat(
-                model=llm_model_name,
-                messages=[{"role": "user", "content": prompt}]
+            tokenizer, model = get_rebel()
+            # Tokenize input text (truncating at 512 max length as per model limits)
+            inputs = tokenizer(text, max_length=512, padding=True, truncation=True, return_tensors="pt")
+            device = next(model.parameters()).device
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            
+            # Generate raw triplet string
+            gen_kwargs = {
+                "max_length": 256,
+                "length_penalty": 0,
+                "num_beams": 3,
+                "num_return_sequences": 1,
+            }
+            generated_tokens = model.generate(
+                **inputs,
+                **gen_kwargs,
             )
-            content = response.message.content.strip()
-            for line in content.split('\n'):
-                parts = [p.strip() for p in line.split('|')]
-                if len(parts) == 3:
-                    self.add_relationship(parts[0], parts[1], parts[2], department_name)
+            
+            # Decode keeping special tokens (like <triplet>, <subj>) needed for parsing
+            decoded_text = tokenizer.batch_decode(generated_tokens, skip_special_tokens=False)[0]
+            
+            # Parse the text into clean dictionaries and store
+            relations = parse_rebel_output(decoded_text)
+            for rel in relations:
+                self.add_relationship(rel['head'], rel['type'], rel['tail'], department_name)
         except Exception as e:
-            print(f"KG Extraction Error: {e}")
+            print(f"KG Extraction Error (REBEL): {e}")
 
     def _extract_entities_cached(self, query_text: str, llm_model_name: str) -> tuple:
         """Fix #6: Module-level dict cache — no reference to self, no memory leak."""
