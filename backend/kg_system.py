@@ -145,15 +145,17 @@ class KnowledgeGraph:
                 self._index_node(source)
                 self._index_node(target)
 
-    def extract_from_text(self, text, department_name="global"):
+    def extract_from_texts(self, texts, department_name="global"):
+        if not texts:
+            return
         try:
             tokenizer, model = get_rebel()
-            # Tokenize input text (truncating at 512 max length as per model limits)
-            inputs = tokenizer(text, max_length=512, padding=True, truncation=True, return_tensors="pt")
+            # Tokenize batch of input texts (truncating at 512 max length)
+            inputs = tokenizer(texts, max_length=512, padding=True, truncation=True, return_tensors="pt")
             device = next(model.parameters()).device
             inputs = {k: v.to(device) for k, v in inputs.items()}
             
-            # Generate raw triplet string
+            # Generate raw triplet strings in parallel
             gen_kwargs = {
                 "max_length": 256,
                 "length_penalty": 0,
@@ -165,15 +167,16 @@ class KnowledgeGraph:
                 **gen_kwargs,
             )
             
-            # Decode keeping special tokens (like <triplet>, <subj>) needed for parsing
-            decoded_text = tokenizer.batch_decode(generated_tokens, skip_special_tokens=False)[0]
+            # Decode batch keeping special tokens needed for parsing
+            decoded_texts = tokenizer.batch_decode(generated_tokens, skip_special_tokens=False)
             
             # Parse the text into clean dictionaries and store
-            relations = parse_rebel_output(decoded_text)
-            for rel in relations:
-                self.add_relationship(rel['head'], rel['type'], rel['tail'], department_name)
+            for decoded_text in decoded_texts:
+                relations = parse_rebel_output(decoded_text)
+                for rel in relations:
+                    self.add_relationship(rel['head'], rel['type'], rel['tail'], department_name)
         except Exception as e:
-            print(f"KG Extraction Error (REBEL): {e}")
+            print(f"KG Extraction Error (REBEL Batch): {e}")
 
     def _extract_entities_cached(self, query_text: str, llm_model_name: str) -> tuple:
         """Fix #6: Module-level dict cache — no reference to self, no memory leak."""

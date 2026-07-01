@@ -82,15 +82,18 @@ class MultiDeptRAG:
             docs_copy = list(documents)
 
             def run_kg_extraction(docs, dept):
-                # Process the raw 500-character chunks directly (prevents >512 token truncation for REBEL)
+                # Process the chunks in massive parallel batches on the GPU
+                batch_size = 32
                 with _kg_semaphore:
                     print(f"\n[BACKGROUND TASK] KG extraction started for {dept} ({len(docs)} chunks)...")
-                    print(f"-> Extracting knowledge graph facts...")
-                    for idx, chunk in enumerate(docs):
-                        self.kg.extract_from_text(chunk, dept)
+                    print(f"-> Extracting knowledge graph facts in batches of {batch_size}...")
+                    
+                    for i in range(0, len(docs), batch_size):
+                        batch = docs[i:i + batch_size]
+                        self.kg.extract_from_texts(batch, dept)
                         
-                        if (idx + 1) % 50 == 0 or (idx + 1) == len(docs):
-                            print(f"[BACKGROUND TASK] KG extraction progress: {idx + 1}/{len(docs)} chunks done")
+                        if (i + len(batch)) % (batch_size * 5) == 0 or (i + len(batch)) == len(docs):
+                            print(f"[BACKGROUND TASK] KG extraction progress: {i + len(batch)}/{len(docs)} chunks done")
                     
                     self.kg.invalidate_cache()
                     print(f"[BACKGROUND TASK] KG extraction complete for {dept}!\n")
