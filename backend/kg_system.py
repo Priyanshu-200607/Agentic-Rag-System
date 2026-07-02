@@ -66,6 +66,18 @@ def parse_rebel_output(text):
     if subject != '' and relation != '' and object_ != '':
         relations.append({'head': subject.strip(), 'type': relation.strip(), 'tail': object_.strip()})
     return relations
+
+def unload_rebel():
+    global _rebel_model, _rebel_tokenizer
+    if _rebel_model is not None:
+        del _rebel_model
+        del _rebel_tokenizer
+        _rebel_model = None
+        _rebel_tokenizer = None
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            print("[BACKGROUND TASK] PyTorch VRAM cache cleared.")
 # ----------------------------------
 
 class KnowledgeGraph:
@@ -159,7 +171,7 @@ class KnowledgeGraph:
             gen_kwargs = {
                 "max_length": 256,
                 "length_penalty": 0,
-                "num_beams": 3,
+                "num_beams": 1,  # Switched to Greedy Search: 3x less VRAM and 3x faster
                 "num_return_sequences": 1,
             }
             generated_tokens = model.generate(

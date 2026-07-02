@@ -83,7 +83,7 @@ class MultiDeptRAG:
 
             def run_kg_extraction(docs, dept):
                 # Process the chunks in massive parallel batches on the GPU
-                batch_size = 32
+                batch_size = 16  # Lowered from 32 to prevent PyTorch VRAM OOM spikes
                 with _kg_semaphore:
                     print(f"\n[BACKGROUND TASK] KG extraction started for {dept} ({len(docs)} chunks)...")
                     print(f"-> Extracting knowledge graph facts in batches of {batch_size}...")
@@ -96,6 +96,12 @@ class MultiDeptRAG:
                             print(f"[BACKGROUND TASK] KG extraction progress: {i + len(batch)}/{len(docs)} chunks done")
                     
                     self.kg.invalidate_cache()
+                    
+                    # Unload REBEL from the GPU to free up VRAM for Ollama
+                    import backend.kg_system as kgs
+                    if hasattr(kgs, 'unload_rebel'):
+                        kgs.unload_rebel()
+                        
                     print(f"[BACKGROUND TASK] KG extraction complete for {dept}!\n")
 
             thread = threading.Thread(
