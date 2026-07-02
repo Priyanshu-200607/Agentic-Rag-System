@@ -20,9 +20,12 @@ The system operates using a lightweight, modular **Agentic Orchestrator** archit
 *Note: For the original architectural proposal, see [report.md](report.md).*
 
 ## Key Features
+* **Agentic Routing & Text-to-SQL**: The system automatically classifies queries as Factual or Analytical. Factual queries use Vector+KG RAG, while analytical queries (counts, sums) dynamically generate and execute SQL on the graph database.
+* **Hardware-Aware Auto-Scaling**: A built-in Resource Manager auto-detects your hardware (CUDA, MPS, CPU) to dynamically adjust batch sizes, toggle 8-bit model quantization, and apply active backpressure to prevent memory crashes.
+* **Centralized Configuration**: All models, limits, paths, and security settings are centralized in `config.py`. Domain-specific Knowledge Graph patterns are securely stored in `entities.json`.
 * **Zero Hard-Coded Routing**: You don't need to manually tell the system where to search. The Master Agent figures out if a question belongs to HR, IT, or multiple departments at once.
 * **Granular Security**: Built-in Role-Based Access Control (RBAC) ensures users (like interns) cannot access sensitive data (like Finance) even if they ask for it.
-* **Modular Backend**: Clean, separated code structure (`rag_system.py`, `department_agent.py`, `document_processor.py`, `auth.py`) for easy debugging and upgrading.
+* **Modular Backend**: Clean, separated code structure (`rag_system.py`, `department_agent.py`, `resource_manager.py`) for easy debugging and upgrading.
 * **Local Privacy**: Runs entirely locally using `ollama` and `ChromaDB`.
 
 ## Tech Stack

@@ -1,8 +1,9 @@
 import json
 import os
 import threading
+import config
 
-DB_FILE = "db.json"
+DB_FILE = config.AUTH_DB_PATH
 
 # Fix #3 (db race condition): A single process-level lock so no two
 # concurrent FastAPI requests can read-modify-write db.json simultaneously.

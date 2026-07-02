@@ -1,8 +1,6 @@
 from ollama import chat
-
-# Fix #4: Max characters for context fed into LLM to stay within token limits
-MAX_CONTEXT_CHARS = 8000
-MAX_QUERY_CHARS = 2000
+import config
+from resource_manager import ResourceManager
 
 class DepartmentAgent:
     def __init__(self, department_name, client, embed_model, llm_model_name, kg=None):
@@ -13,9 +11,10 @@ class DepartmentAgent:
         self.collection_name = f"dept_{department_name}"
         self.kg = kg
 
-    def query(self, query_text, n_results=10, distance_threshold=1.5):
+    def query(self, query_text, distance_threshold=1.5):
         # Fix #4: Truncate query before encoding to prevent embedding model issues
-        query_text_safe = query_text[:MAX_QUERY_CHARS]
+        query_text_safe = query_text[:config.MAX_QUERY_CHARS]
+        context_limit = ResourceManager.get_dynamic_context_limit(self.llm_model_name)
 
         try:
             collection = self.client.get_collection(name=self.collection_name)
@@ -23,7 +22,13 @@ class DepartmentAgent:
             return "No documents found for this department."
 
         query_embedding = self.embed_model.encode([query_text_safe]).tolist()
-        results = collection.query(query_embeddings=query_embedding, n_results=n_results)
+        
+        # Phase 3: Dynamic Top-K Retrieval
+        # Calculate optimal chunks (assume ~600 chars per chunk)
+        # Cap at 50 to prevent massive latency on small chunks
+        optimal_n_results = min(50, max(5, context_limit // 600))
+        
+        results = collection.query(query_embeddings=query_embedding, n_results=optimal_n_results)
 
         valid_chunks = []
         if results['documents'] and results['documents'][0]:
@@ -32,8 +37,12 @@ class DepartmentAgent:
         # --- GRAPH RAG: Get Knowledge Graph Facts ---
         kg_facts = []
         if self.kg:
+            # Phase 3: Dynamic Multi-Hop Expansion based on context limit
+            max_facts = config.MAX_KG_FACTS if context_limit <= 8000 else 100
+            max_hops = config.MAX_KG_HOPS if context_limit <= 8000 else 3
+            
             kg_facts = self.kg.get_context_for_entities(
-                query_text_safe, self.llm_model_name, self.department_name
+                query_text_safe, self.llm_model_name, self.department_name, max_hops=max_hops, max_facts=max_facts
             )
 
         kg_context = "\n".join(kg_facts) if kg_facts else ""
@@ -49,8 +58,8 @@ class DepartmentAgent:
 
         # Fix #4: Hard cap combined context to stay within LLM context window.
         # This prevents silent LLM truncation or errors on huge document retrievals.
-        if len(combined_context) > MAX_CONTEXT_CHARS:
-            combined_context = combined_context[:MAX_CONTEXT_CHARS] + "\n[Context truncated to fit model limits]"
+        if len(combined_context) > context_limit:
+            combined_context = combined_context[:context_limit] + "\n[Context truncated to fit model limits]"
 
         prompt = f"""
         Answer ONLY from the context provided below (which includes Vector DB text and structured Knowledge Graph facts).

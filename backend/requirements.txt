@@ -8,3 +8,4 @@ chromadb
 ollama
 pypdf
 python-docx
+psutil

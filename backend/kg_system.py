@@ -2,23 +2,29 @@ import networkx as nx
 import sqlite3
 import re
 import threading
+import json
 from collections import defaultdict
 from ollama import chat
 
-KG_DB_FILE = "knowledge_graph.db"
+import config
+
+KG_DB_FILE = config.KG_DB_PATH
+
+# Load and compile patterns dynamically
+PATTERNS = {}
+try:
+    with open(config.ENTITIES_CONFIG_PATH, "r") as f:
+        _raw_patterns = json.load(f)
+        for k, v in _raw_patterns.items():
+            PATTERNS[k] = re.compile(v, re.I)
+except Exception as e:
+    print(f"Failed to load entities.json: {e}")
 
 # Fix #6: Module-level cache dict replaces @lru_cache on instance method.
-# lru_cache on 'self' prevents garbage collection (memory leak).
-# A module-level dict holds results keyed by (query_text, model) with no reference to self.
 _entity_cache: dict = {}
 _entity_cache_lock = threading.Lock()
 
-PATTERNS = {
-    "employee": re.compile(r"employee[\s_:]?(?:id[\s_:]?)?(\d+)", re.I),
-    "user":     re.compile(r"user[\s_:](\d+)", re.I),
-    "policy":   re.compile(r"(?:hr[\s_])?policy[\s_:](\d+)", re.I),
-    "quarter":  re.compile(r"q([1-4])(?:\s+quarter)?", re.I),
-}
+from resource_manager import ResourceManager
 
 # --- REBEL PIPELINE INTEGRATION ---
 _rebel_model = None
@@ -30,9 +36,23 @@ def get_rebel():
         from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
         import torch
         print("\nLoading REBEL model for Knowledge Graph extraction (this may take a moment)...")
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        _rebel_tokenizer = AutoTokenizer.from_pretrained("Babelscape/rebel-large")
-        _rebel_model = AutoModelForSeq2SeqLM.from_pretrained("Babelscape/rebel-large").to(device)
+        device = ResourceManager.get_device()
+        quantize = ResourceManager.should_quantize_8bit()
+        
+        _rebel_tokenizer = AutoTokenizer.from_pretrained(config.KG_MODEL_NAME)
+        
+        if quantize:
+            print(f"Loading REBEL in 8-bit mode to save VRAM...")
+            _rebel_model = AutoModelForSeq2SeqLM.from_pretrained(
+                config.KG_MODEL_NAME, 
+                load_in_8bit=True,
+                device_map="auto"
+            )
+        else:
+            _rebel_model = AutoModelForSeq2SeqLM.from_pretrained(config.KG_MODEL_NAME)
+            if device != "cpu":
+                _rebel_model = _rebel_model.to(device)
+                
     return _rebel_tokenizer, _rebel_model
 
 def parse_rebel_output(text):

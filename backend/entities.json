@@ -1,0 +1,6 @@
+{
+    "employee": "employee[\\s_:]?(?:id[\\s_:]?)?(\\d+)",
+    "user": "user[\\s_:](\\d+)",
+    "policy": "(?:hr[\\s_])?policy[\\s_:](\\d+)",
+    "quarter": "q([1-4])(?:\\s+quarter)?"
+}

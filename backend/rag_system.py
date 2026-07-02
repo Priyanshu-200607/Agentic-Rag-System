@@ -6,12 +6,11 @@ from sentence_transformers import SentenceTransformer
 import chromadb
 from ollama import chat
 
+import config
+from resource_manager import ResourceManager
 from document_processor import process_file
 from department_agent import DepartmentAgent
 from kg_system import KnowledgeGraph
-
-# Fix #7: Cap history at this many entries before pruning oldest
-HISTORY_MAX_ENTRIES = 500
 
 # Fix #3: Max concurrent KG extraction threads (prevents Ollama RAM saturation)
 _kg_semaphore = threading.Semaphore(1)
@@ -22,14 +21,15 @@ def get_collection_name(department_name: str) -> str:
 
 class MultiDeptRAG:
     """Master Agent / Orchestrator for Multi-Department RAG"""
-    def __init__(self, db_path="./chroma_db_multi", embed_model_name="BAAI/bge-small-en-v1.5", llm_model_name="gemma2:2b"):
+    def __init__(self, db_path=None, embed_model_name=None, llm_model_name=None):
         print("Initializing Agentic Orchestrator System...")
-        # GPU encoding is fast for batch uploads. The 140MB idle VRAM cost is trivial
-        # on an RTX 4060 (8GB). The idle GPU activity you saw before was from the
-        # unthrottled KG extraction thread — that's now fixed with a semaphore + rate limit.
-        self.embed_model = SentenceTransformer(embed_model_name)
-        self.client = chromadb.PersistentClient(path=db_path)
-        self.llm_model_name = llm_model_name
+        
+        self.db_path = db_path or config.CHROMA_DB_PATH
+        self.embed_model_name = embed_model_name or config.EMBED_MODEL_NAME
+        self.llm_model_name = llm_model_name or config.LLM_MODEL_NAME
+
+        self.embed_model = SentenceTransformer(self.embed_model_name)
+        self.client = chromadb.PersistentClient(path=self.db_path)
         self.agents = {}
         self.kg = KnowledgeGraph()
         print("Master Agent and Department Agents ready.")
@@ -65,7 +65,7 @@ class MultiDeptRAG:
             embeddings = self.embed_model.encode(documents, show_progress_bar=True).tolist()
             ids = [str(uuid.uuid4()) for _ in range(len(documents))]
 
-            batch_size = 5000
+            batch_size = ResourceManager.get_optimal_batch_sizes()["chroma_batch"]
             for i in range(0, len(documents), batch_size):
                 collection.add(
                     ids=ids[i:i+batch_size],
@@ -83,17 +83,23 @@ class MultiDeptRAG:
 
             def run_kg_extraction(docs, dept):
                 # Process the chunks in massive parallel batches on the GPU
-                batch_size = 16  # Lowered from 32 to prevent PyTorch VRAM OOM spikes
+                current_batch_size = ResourceManager.get_optimal_batch_sizes()["kg_batch"]
                 with _kg_semaphore:
                     print(f"\n[BACKGROUND TASK] KG extraction started for {dept} ({len(docs)} chunks)...")
-                    print(f"-> Extracting knowledge graph facts in batches of {batch_size}...")
+                    print(f"-> Extracting knowledge graph facts in batches of {current_batch_size}...")
                     
-                    for i in range(0, len(docs), batch_size):
-                        batch = docs[i:i + batch_size]
+                    i = 0
+                    while i < len(docs):
+                        # Active Backpressure: Check RAM/VRAM before processing batch
+                        current_batch_size = ResourceManager.check_memory_pressure(current_batch_size)
+                        
+                        batch = docs[i:i + current_batch_size]
                         self.kg.extract_from_texts(batch, dept)
                         
-                        if (i + len(batch)) % (batch_size * 5) == 0 or (i + len(batch)) == len(docs):
-                            print(f"[BACKGROUND TASK] KG extraction progress: {i + len(batch)}/{len(docs)} chunks done")
+                        i += current_batch_size
+                        
+                        if i % (current_batch_size * 5) == 0 or i >= len(docs):
+                            print(f"[BACKGROUND TASK] KG extraction progress: {min(i, len(docs))}/{len(docs)} chunks done")
                     
                     self.kg.invalidate_cache()
                     
@@ -147,7 +153,7 @@ class MultiDeptRAG:
 
     def route_query(self, query, allowed_departments):
         # Fix #4: Truncate query to prevent LLM context overflow in router
-        query_truncated = query[:1000]
+        query_truncated = query[:config.MAX_QUERY_CHARS]
         prompt = f"""
         You are a routing assistant. Decide which departments should be queried based on the query.
         Available departments: {', '.join(allowed_departments)}
@@ -171,6 +177,56 @@ class MultiDeptRAG:
             pass
         return allowed_departments
 
+    def execute_text_to_sql(self, query, allowed_departments):
+        import re
+        
+        schema = """
+        CREATE TABLE edges (
+            source TEXT, 
+            relation TEXT, 
+            target TEXT, 
+            department TEXT,
+            PRIMARY KEY (source, relation, target)
+        )
+        """
+        prompt = f"""
+        You are a SQL generator. Write a SQLite query to answer the user's question based on the following schema:
+        {schema}
+        
+        Allowed departments for this user: {', '.join(allowed_departments)}
+        (If the query filters by department, it MUST only include allowed departments).
+        
+        User Query: {query}
+        
+        Return ONLY the raw SQL query inside a ```sql ... ``` block. Do not include any explanations.
+        """
+        
+        response = chat(
+            model=self.llm_model_name,
+            messages=[{"role": "user", "content": prompt}],
+            options={"temperature": 0.0}
+        )
+        
+        sql_match = re.search(r"```sql(.*?)```", response.message.content, re.DOTALL | re.IGNORECASE)
+        if not sql_match:
+            # Fallback if the model forgot the markdown block
+            sql = response.message.content.strip()
+        else:
+            sql = sql_match.group(1).strip()
+            
+        try:
+            with self.kg._write_lock:
+                cursor = self.kg.conn.cursor()
+                cursor.execute(sql)
+                rows = cursor.fetchall()
+                
+            if not rows:
+                return "The database query returned no results."
+                
+            return f"Database results: {rows}"
+        except Exception as e:
+            return f"Failed to execute analytical query. (SQL Error: {e})"
+
     def process_request(self, query, username):
         from auth import load_db
         db = load_db()
@@ -186,6 +242,38 @@ class MultiDeptRAG:
         if not allowed_departments:
             return "Access Denied: You do not have permission for any departments."
 
+        # Phase 3: Agentic Routing (Analytical vs Factual)
+        intent_prompt = f"""
+        Classify the following query as 'analytical' (requires counting, sums, averages, exact numbers, or scanning across the entire database) or 'factual' (asking for specific knowledge, definitions, rules, or single facts).
+        Query: {query[:500]}
+        Return ONLY the word 'analytical' or 'factual'.
+        """
+        intent_response = chat(
+            model=self.llm_model_name,
+            messages=[{"role": "user", "content": intent_prompt}],
+            options={"temperature": 0.0}
+        )
+        is_analytical = "analytical" in intent_response.message.content.lower()
+
+        if is_analytical:
+            print(f"Routing to Text-to-SQL Tool for query: {query}")
+            sql_result = self.execute_text_to_sql(query, allowed_departments)
+            
+            synthesis_prompt = f"""
+            You are a Master Agent. The user asked an analytical question. A SQL query was run against the graph database to answer it.
+            Based ONLY on the Database Results, formulate a clear, natural language answer to the user's question.
+            
+            User Query: {query[:config.MAX_QUERY_CHARS]}
+            Database Results: {sql_result}
+            """
+            final_response = chat(
+                model=self.llm_model_name,
+                messages=[{"role": "user", "content": synthesis_prompt}],
+                options={"temperature": 0.0}
+            )
+            return final_response.message.content
+
+        # Standard Vector + KG RAG Pipeline
         target_departments = self.route_query(query, allowed_departments)
 
         active_target_departments = [
@@ -219,7 +307,7 @@ class MultiDeptRAG:
         2. Combine the information into a single clear answer.
         3. Do NOT mention that a department did not have information.
 
-        User Query: {query[:2000]}
+        User Query: {query[:config.MAX_QUERY_CHARS]}
 
         Responses:
         """

@@ -2,18 +2,19 @@ from fastapi import FastAPI, Form, File, UploadFile, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from rag_system import MultiDeptRAG, HISTORY_MAX_ENTRIES
+from rag_system import MultiDeptRAG
 from models import Question, Upload, Login, UserCreate, AccessUpdate
 from auth import load_db, save_db
 import os
 import json
 from typing import Optional
+import config
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,16 +47,14 @@ def chat(req: Question):
     )
     return {"answer": answer}
 
-HISTORY_FILE = "history.json"
-
 def load_history():
-    if os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, "r") as f:
+    if os.path.exists(config.HISTORY_FILE_PATH):
+        with open(config.HISTORY_FILE_PATH, "r") as f:
             return json.load(f)
     return []
 
 def save_history(history):
-    with open(HISTORY_FILE, "w") as f:
+    with open(config.HISTORY_FILE_PATH, "w") as f:
         json.dump(history, f)
 
 uploaded_files_history = load_history()
@@ -80,10 +79,10 @@ async def upload(
         db["departments"][department] = {"status": "active"}
         save_db(db)
 
-    os.makedirs("uploads", exist_ok=True)
+    os.makedirs(config.UPLOAD_DIR, exist_ok=True)
     saved_paths = []
     for file in files:
-        file_path = os.path.join("uploads", file.filename)
+        file_path = os.path.join(config.UPLOAD_DIR, file.filename)
         with open(file_path, "wb") as buffer:
             import shutil
             shutil.copyfileobj(file.file, buffer)
@@ -91,8 +90,8 @@ async def upload(
         uploaded_files_history.append({"filename": file.filename, "department": department})
 
     # Fix #7: Cap history to prevent unbounded RAM and file growth
-    if len(uploaded_files_history) > HISTORY_MAX_ENTRIES:
-        del uploaded_files_history[:-HISTORY_MAX_ENTRIES]
+    if len(uploaded_files_history) > config.HISTORY_MAX_ENTRIES:
+        del uploaded_files_history[:-config.HISTORY_MAX_ENTRIES]
 
     save_history(uploaded_files_history)
 
@@ -116,7 +115,7 @@ def get_history(username: str):
 @app.delete("/upload/{department}/{filename}")
 def delete_file(department: str, filename: str, x_username: Optional[str] = Header(None)):
     _require_admin(x_username)
-    file_path = os.path.join("uploads", filename)
+    file_path = os.path.join(config.UPLOAD_DIR, filename)
     system.admin_delete_file(department, file_path)
 
     global uploaded_files_history
