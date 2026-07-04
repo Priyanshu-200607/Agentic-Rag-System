@@ -1,6 +1,5 @@
 import os
 import sys
-import platform
 import subprocess
 import shutil
 import venv
@@ -9,7 +8,7 @@ def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def print_header(text):
-    print(f"\n{'='*50}\n{text}\n{'='*50}")
+    print(f"\n{'='*55}\n{text}\n{'='*55}")
 
 def run_cmd(cmd, env=None, cwd=None):
     try:
@@ -20,11 +19,23 @@ def run_cmd(cmd, env=None, cwd=None):
 
 def main():
     clear_screen()
-    print_header("Department RAG System - Auto Installer")
+    print_header("Department RAG System - Unified Auto Installer")
     
-    # 1. OS Detection
-    os_name = platform.system()
-    print(f"Detected OS: {os_name}")
+    # 1. OS & Environment Selection
+    print("Please select your target Operating System / Environment:")
+    print("1) Linux (Desktop/Local)")
+    print("2) Mac (Apple Silicon or Intel)")
+    print("3) Windows (Desktop/Local)")
+    print("4) Server (Headless Cloud Node / Ubuntu Server)")
+    
+    os_choice = input("\nEnter choice (1/2/3/4): ").strip()
+    if os_choice not in ["1", "2", "3", "4"]:
+        print("Invalid choice. Exiting.")
+        sys.exit(1)
+
+    is_windows = (os_choice == "3")
+    is_mac = (os_choice == "2")
+    is_linux_or_server = (os_choice in ["1", "4"])
 
     # 2. Select Installation Directory
     current_dir = os.path.abspath(os.path.dirname(__file__))
@@ -38,8 +49,7 @@ def main():
         if not os.path.exists(install_path):
             os.makedirs(install_path)
         if install_path != current_dir:
-            print(f"Copying files to {install_path}...")
-            # Simple copy logic (excluding .git and environments)
+            print(f"Copying project files to {install_path}...")
             for item in os.listdir(current_dir):
                 if item in ['.git', 'backend/env', 'venv']:
                     continue
@@ -50,28 +60,19 @@ def main():
                 else:
                     shutil.copy2(s, d)
 
-    # 3. Hardware Detection / Selection
-    print_header("Hardware Acceleration Setup")
-    print("This system auto-scales based on hardware. Please select your primary compute device:")
-    print("1) NVIDIA GPU (CUDA) - Recommended for Windows/Linux Servers")
-    print("2) Apple Silicon (M1/M2/M3 - MPS) - Recommended for Mac")
-    print("3) CPU Only - Standard but slower")
-    
-    hw_choice = input("Enter choice (1/2/3) [Default: 3]: ").strip() or "3"
-
-    # 4. Create Virtual Environment
+    # 3. Create Virtual Environment
     print_header("Setting up Virtual Environment")
     backend_dir = os.path.join(install_path, "backend")
     if not os.path.exists(backend_dir):
-        print(f"[Error] 'backend' folder not found in {install_path}. Ensure you clone the full repo.")
+        print(f"[Error] 'backend' folder not found. Are you running this from the repository root?")
         sys.exit(1)
 
     venv_dir = os.path.join(backend_dir, "env")
     print(f"Creating Python virtual environment in: {venv_dir}")
     venv.create(venv_dir, with_pip=True)
 
-    # Determine pip path
-    if os_name == "Windows":
+    # Determine pip and python paths based on chosen OS structure
+    if is_windows:
         pip_exe = os.path.join(venv_dir, "Scripts", "pip.exe")
         python_exe = os.path.join(venv_dir, "Scripts", "python.exe")
     else:
@@ -81,37 +82,63 @@ def main():
     # Upgrade pip
     run_cmd([python_exe, "-m", "pip", "install", "--upgrade", "pip"], cwd=backend_dir)
 
-    # 5. Install Dependencies
-    print_header("Installing Dependencies")
+    # 4. Dependency Configuration (Version Pinned for Stability)
+    print_header("Installing Core Dependencies")
     
-    # First, install base requirements
-    req_path = os.path.join(backend_dir, "requirements.txt")
-    print(f"Installing base packages from {req_path}...")
-    run_cmd([pip_exe, "install", "-r", "requirements.txt"], cwd=backend_dir)
+    # Conflict-free pinned core dependencies common to all platforms
+    core_packages = [
+        "fastapi==0.110.0",
+        "uvicorn==0.29.0",
+        "python-multipart==0.0.9",
+        "python-jose==3.3.0",
+        "passlib[bcrypt]==1.7.4",
+        "chromadb==0.4.24",
+        "ollama==0.1.7",
+        "pypdf==4.1.0",
+        "python-docx==1.1.0",
+        "psutil==5.9.8",
+        "sentence-transformers==2.5.1"
+    ]
+    
+    # Install core packages safely
+    run_cmd([pip_exe, "install"] + core_packages, cwd=backend_dir)
 
-    # Second, install hardware-specific PyTorch (since sentence-transformers brings a generic one)
-    if hw_choice == "1":
-        print("\nInstalling PyTorch with CUDA support...")
+    print_header("Installing OS-Specific AI Acceleration Libraries")
+    if is_linux_or_server or is_windows:
+        print("Installing PyTorch 2.2.1 with CUDA 12.1 support...")
+        # PyTorch with CUDA support (Crucial for Linux, Server, and Windows with NVIDIA GPUs)
         run_cmd([
-            pip_exe, "install", "torch", "torchvision", "torchaudio", 
+            pip_exe, "install", 
+            "torch==2.2.1+cu121", 
+            "torchvision==0.17.1+cu121", 
+            "torchaudio==2.2.1+cu121", 
             "--index-url", "https://download.pytorch.org/whl/cu121"
         ], cwd=backend_dir)
-        print("\nInstalling bitsandbytes for 8-bit quantization...")
-        run_cmd([pip_exe, "install", "bitsandbytes"], cwd=backend_dir)
-    elif hw_choice == "2":
-        print("\nApple Silicon selected. PyTorch MPS support is included natively in the base installation.")
-    else:
-        print("\nCPU setup complete. Base PyTorch is installed.")
+        
+        # Bitsandbytes for 8-bit LLM optimization (highly recommended for Linux/Server)
+        print("Installing bitsandbytes optimization (8-bit quantization)...")
+        run_cmd([pip_exe, "install", "bitsandbytes==0.43.0"], cwd=backend_dir)
+        
+    elif is_mac:
+        print("Installing PyTorch 2.2.1 with Native MPS (Apple Silicon) Support...")
+        # PyTorch standard install contains native Apple Silicon (MPS) acceleration out of the box
+        run_cmd([
+            pip_exe, "install", 
+            "torch==2.2.1", 
+            "torchvision==0.17.1", 
+            "torchaudio==2.2.1"
+        ], cwd=backend_dir)
+        print("Note: bitsandbytes is not supported on Mac. 8-bit quantization will be bypassed automatically.")
 
     print_header("Installation Complete!")
-    print("To run the system:")
-    print("1) Ensure Ollama is installed (https://ollama.com/) and running.")
-    print(f"2) Open a terminal and navigate to: {backend_dir}")
-    if os_name == "Windows":
-        print("3) Run: env\\Scripts\\activate")
+    print("Everything is set up with strict, conflict-free versions specifically for your OS.")
+    print("\nTo start the server:")
+    print(f"1. Open a terminal in: {backend_dir}")
+    if is_windows:
+        print("2. Activate env:  env\\Scripts\\activate")
     else:
-        print("3) Run: source env/bin/activate")
-    print("4) Start the server: uvicorn api:app --reload")
-
+        print("2. Activate env:  source env/bin/activate")
+    print("3. Start server:  uvicorn api:app --reload")
+    
 if __name__ == "__main__":
     main()
