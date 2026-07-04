@@ -130,6 +130,23 @@ def main():
         ], cwd=backend_dir)
         print("Note: bitsandbytes is not supported on Mac. 8-bit quantization will be bypassed automatically.")
 
+    # 5. Local LLM Setup (Ollama)
+    print_header("Local LLM Setup (Ollama)")
+    try:
+        # Check if ollama CLI is installed globally
+        subprocess.check_output(["ollama", "--version"], stderr=subprocess.STDOUT)
+        print("Ollama engine detected on your system!")
+        pull_choice = input("Would you like to automatically pull the 'llama3' model now? (y/n) [y]: ").strip().lower() or 'y'
+        if pull_choice == 'y':
+            print("Pulling llama3 model... (This may take a few minutes depending on your internet speed)")
+            subprocess.run(["ollama", "pull", "llama3"])
+            print("Model pulled successfully!")
+        else:
+            print("Skipping model pull.")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("[Warning] Ollama engine not detected on your system path.")
+        print("You will need to manually install Ollama from https://ollama.com/ and run 'ollama pull llama3' before starting the server.")
+
     print_header("Installation Complete!")
     print("Everything is set up with strict, conflict-free versions specifically for your OS.")
     print("\nTo start the server:")
