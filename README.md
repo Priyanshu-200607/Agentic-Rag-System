@@ -38,22 +38,35 @@ The system operates using a lightweight, modular **Agentic Orchestrator** archit
 
 ### Prerequisites
 * Python 3.9+
-* [Ollama](https://ollama.com/) installed and running locally with your chosen model (default is `gemma2:2b`).
+* [Ollama](https://ollama.com/) installed and running locally with your chosen model (default is `llama3`).
 
 ### Installation
-1. Install Python dependencies using the provided virtual environment:
+1. Clone the repository and navigate into it:
    ```bash
-   cd backend
-   python -m venv env
-   source env/bin/activate
-   pip install -r requirements.txt
+   git clone <your-repo-url>
+   cd department_rag
    ```
-2. Start the FastAPI server:
+2. Run the interactive Unified Auto-Installer:
    ```bash
-   # Ensure you are still in the backend folder and your virtual environment is activated
+   python install.py
+   ```
+   *The installer will ask for your target Operating System (Windows, Mac, Linux, Server) and automatically provision a virtual environment with strict, conflict-free package versions and the correct hardware-accelerated PyTorch binaries (CUDA/MPS).*
+
+3. Start the FastAPI server (as instructed by the installer at the end of its run):
+   ```bash
+   # Make sure you navigate to backend and activate the generated virtual environment
+   cd backend
+   
+   # For Linux/Mac:
+   source env/bin/activate
+   
+   # For Windows:
+   env\Scripts\activate
+   
+   # Start the server
    uvicorn api:app --reload
    ```
-3. Open your browser and navigate to: `http://localhost:8000`
+4. Open your browser and navigate to: `http://localhost:8000`
 
 ### Testing the App
 1. Log in as `admin` (password: `123`) to get upload permissions.
