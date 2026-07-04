@@ -176,10 +176,50 @@ class KnowledgeGraph:
                 self.graph.add_edge(source, target, label=relation, dept=department)
                 self._index_node(source)
                 self._index_node(target)
+            return f"{source} | {relation} | {target}"
+        return None
 
     def extract_from_texts(self, texts, department_name="global"):
         if not texts:
-            return
+            return []
+            
+        extracted_facts = []
+        if config.ADAPTIVE_KG_EXTRACTION and ResourceManager.get_device() != "cpu":
+            print("[BACKGROUND TASK] Using LLM for High-Quality KG Extraction...")
+            extracted_facts = self._extract_with_llm(texts, department_name)
+        else:
+            print("[BACKGROUND TASK] Using REBEL for Fast KG Extraction...")
+            extracted_facts = self._extract_with_rebel(texts, department_name)
+            
+        return extracted_facts
+        
+    def _extract_with_llm(self, texts, department_name="global"):
+        extracted_facts = []
+        for text in texts:
+            prompt = f"""
+            Extract knowledge graph triples from the following text.
+            Format exactly as:
+            source_entity | relationship | target_entity
+            
+            Text: {text}
+            """
+            try:
+                response = chat(
+                    model=config.LLM_MODEL_NAME,
+                    messages=[{"role": "user", "content": prompt}],
+                    options={"temperature": 0.0}
+                )
+                for line in response.message.content.split('\n'):
+                    parts = [p.strip() for p in line.split('|')]
+                    if len(parts) == 3:
+                        fact = self.add_relationship(parts[0], parts[1], parts[2], department_name)
+                        if fact: extracted_facts.append(fact)
+            except Exception as e:
+                print(f"KG Extraction Error (LLM): {e}")
+        return extracted_facts
+
+    def _extract_with_rebel(self, texts, department_name="global"):
+        extracted_facts = []
         try:
             tokenizer, model = get_rebel()
             # Tokenize batch of input texts (truncating at 512 max length)
@@ -206,9 +246,12 @@ class KnowledgeGraph:
             for decoded_text in decoded_texts:
                 relations = parse_rebel_output(decoded_text)
                 for rel in relations:
-                    self.add_relationship(rel['head'], rel['type'], rel['tail'], department_name)
+                    fact = self.add_relationship(rel['head'], rel['type'], rel['tail'], department_name)
+                    if fact: extracted_facts.append(fact)
         except Exception as e:
             print(f"KG Extraction Error (REBEL Batch): {e}")
+            
+        return extracted_facts
 
     def _extract_entities_cached(self, query_text: str, llm_model_name: str) -> tuple:
         """Fix #6: Module-level dict cache — no reference to self, no memory leak."""

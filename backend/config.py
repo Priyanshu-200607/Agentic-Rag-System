@@ -1,9 +1,10 @@
 import os
 
 # --- MODEL CONFIGURATION ---
-LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "gemma2:2b")
+LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "llama3")
 EMBED_MODEL_NAME = os.getenv("EMBED_MODEL_NAME", "BAAI/bge-small-en-v1.5")
 KG_MODEL_NAME = os.getenv("KG_MODEL_NAME", "Babelscape/rebel-large")
+ADAPTIVE_KG_EXTRACTION = True # If True, use LLM for extraction when VRAM is high, else fallback to REBEL
 
 # --- PATH CONFIGURATION ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

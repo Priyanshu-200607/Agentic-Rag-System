@@ -76,6 +76,14 @@
             "allowed_departments": [
                 "sales"
             ]
+        },
+        "market1": {
+            "password": "123",
+            "role": "employee",
+            "status": "active",
+            "allowed_departments": [
+                "marketing"
+            ]
         }
     },
     "departments": {
@@ -89,6 +97,9 @@
             "status": "active"
         },
         "sales": {
+            "status": "active"
+        },
+        "marketing": {
             "status": "active"
         }
     }

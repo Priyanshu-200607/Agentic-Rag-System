@@ -40,7 +40,8 @@ def save_db(data):
 
 def _write_db_unsafe(data):
     """Write db.json atomically using a temp file swap to prevent partial-write corruption."""
-    tmp_path = DB_FILE + ".tmp"
+    import uuid
+    tmp_path = f"{DB_FILE}.{uuid.uuid4().hex}.tmp"
     with open(tmp_path, "w") as f:
         json.dump(data, f, indent=4)
     # Atomic rename — on Linux this is guaranteed to be atomic

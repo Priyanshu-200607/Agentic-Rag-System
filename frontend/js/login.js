@@ -18,7 +18,11 @@ async function login() {
     if(data.success) {
         localStorage.setItem('username', data.username);
         localStorage.setItem('role', data.role);
-        window.location.href = 'chat.html';
+        if (data.role === 'admin' || data.role === 'manager') {
+            window.location.href = 'admin.html';
+        } else {
+            window.location.href = 'chat.html';
+        }
     } else {
         alert(data.message || "Login failed! Invalid credentials.");
     }

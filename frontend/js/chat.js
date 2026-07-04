@@ -304,26 +304,30 @@ async function toggleDeptSuspend(name) {
 }
 
 async function addUser() {
-    const username = document.getElementById('newUsername').value.trim();
+    const newUser = document.getElementById('newUsername').value.trim().toLowerCase();
     const password = document.getElementById('newPassword').value.trim();
     const roleVal = document.getElementById('newRole').value;
     const accessStr = document.getElementById('newAccess').value.trim();
-    if(!username || !password) return alert("Username and password required");
+    if(!newUser || !password) return alert("Username and password required");
     
-    let allowed = accessStr ? accessStr.split(',').map(s=>s.trim()) : [];
+    let allowed = accessStr ? accessStr.split(',').map(s=>s.trim()).filter(s=>s) : [];
     
-    await fetch(`http://127.0.0.1:8000/admin/users`, {
+    const response = await fetch(`http://127.0.0.1:8000/admin/users`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-username': username },
-        body: JSON.stringify({username: username, password, role: roleVal, allowed_departments: allowed})
+        headers: { 'Content-Type': 'application/json', 'x-username': username }, // 'username' = logged-in admin
+        body: JSON.stringify({username: newUser, password, role: roleVal, allowed_departments: allowed})
     });
     
-    // Clear inputs after successful creation
-    document.getElementById('newUsername').value = '';
-    document.getElementById('newPassword').value = '';
-    document.getElementById('newAccess').value = '';
-    
-    loadAdminData();
+    const data = await response.json();
+    if (data.status === 'success') {
+        // Clear inputs after successful creation
+        document.getElementById('newUsername').value = '';
+        document.getElementById('newPassword').value = '';
+        document.getElementById('newAccess').value = '';
+        loadAdminData();
+    } else {
+        alert('Failed to create user: ' + (data.detail || 'Unknown error'));
+    }
 }
 
 async function toggleUserSuspend(targetUser) {

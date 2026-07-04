@@ -9,6 +9,8 @@ import os
 import json
 from typing import Optional
 import config
+import re
+import uuid
 
 app = FastAPI()
 
@@ -49,15 +51,18 @@ def chat(req: Question):
 
 def load_history():
     if os.path.exists(config.HISTORY_FILE_PATH):
-        with open(config.HISTORY_FILE_PATH, "r") as f:
-            return json.load(f)
+        try:
+            with open(config.HISTORY_FILE_PATH, "r") as f:
+                return json.load(f)
+        except Exception:
+            return []
     return []
 
 def save_history(history):
-    with open(config.HISTORY_FILE_PATH, "w") as f:
+    tmp_path = f"{config.HISTORY_FILE_PATH}.{uuid.uuid4().hex}.tmp"
+    with open(tmp_path, "w") as f:
         json.dump(history, f)
-
-uploaded_files_history = load_history()
+    os.replace(tmp_path, config.HISTORY_FILE_PATH)
 
 @app.post("/upload")
 async def upload(
@@ -75,25 +80,32 @@ async def upload(
     if user.get("status") == "suspended":
         raise HTTPException(status_code=403, detail="Forbidden: Your account is suspended.")
 
+    if not re.match(r"^[a-zA-Z0-9_-]{3,60}$", department):
+        raise HTTPException(status_code=400, detail="Invalid department name. Must be 3-60 alphanumeric characters.")
+
     if department not in db["departments"]:
         db["departments"][department] = {"status": "active"}
         save_db(db)
 
     os.makedirs(config.UPLOAD_DIR, exist_ok=True)
     saved_paths = []
+    
+    history = load_history()
+    
     for file in files:
-        file_path = os.path.join(config.UPLOAD_DIR, file.filename)
+        safe_filename = os.path.basename(file.filename)
+        file_path = os.path.join(config.UPLOAD_DIR, safe_filename)
         with open(file_path, "wb") as buffer:
             import shutil
             shutil.copyfileobj(file.file, buffer)
         saved_paths.append(file_path)
-        uploaded_files_history.append({"filename": file.filename, "department": department})
+        history.append({"filename": safe_filename, "department": department})
 
     # Fix #7: Cap history to prevent unbounded RAM and file growth
-    if len(uploaded_files_history) > config.HISTORY_MAX_ENTRIES:
-        del uploaded_files_history[:-config.HISTORY_MAX_ENTRIES]
+    if len(history) > config.HISTORY_MAX_ENTRIES:
+        del history[:-config.HISTORY_MAX_ENTRIES]
 
-    save_history(uploaded_files_history)
+    save_history(history)
 
     system.admin_upload_to_department(department, saved_paths)
     return {"status": "success"}
@@ -102,28 +114,34 @@ async def upload(
 def get_history(username: str):
     db = load_db()
     user = db["users"].get(username)
-    if not user:
-        return {"history": [], "allowed": []}
+    if not user: return {"history": [], "allowed": []}
     
-    if user.get("role") == "admin":
-        return {"history": uploaded_files_history, "allowed": list(db["departments"].keys())}
-        
-    allowed = list(set(user.get("allowed_departments", [])))
-    filtered = [item for item in uploaded_files_history if item["department"] in allowed]
-    return {"history": filtered, "allowed": allowed}
+    history, is_admin = load_history(), user.get("role") == "admin"
+    allowed = list(db["departments"].keys()) if is_admin else list(set(user.get("allowed_departments", [])))
+    return {
+        "history": history if is_admin else [i for i in history if i["department"] in allowed],
+        "allowed": allowed
+    }
 
 @app.delete("/upload/{department}/{filename}")
 def delete_file(department: str, filename: str, x_username: Optional[str] = Header(None)):
     _require_admin(x_username)
-    file_path = os.path.join(config.UPLOAD_DIR, filename)
+    safe_filename = os.path.basename(filename)
+    file_path = os.path.join(config.UPLOAD_DIR, safe_filename)
     system.admin_delete_file(department, file_path)
 
-    global uploaded_files_history
-    uploaded_files_history = [
-        item for item in uploaded_files_history
-        if not (item["filename"] == filename and item["department"] == department)
+    if os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+
+    history = load_history()
+    history = [
+        item for item in history
+        if not (item["filename"] == safe_filename and item["department"] == department)
     ]
-    save_history(uploaded_files_history)
+    save_history(history)
     return {"status": "success"}
 
 @app.delete("/upload/{department}")
@@ -133,13 +151,26 @@ def clear_department_docs(department: str, x_username: Optional[str] = Header(No
 
     system.admin_clear_department(department)
 
+    history = load_history()
+    to_delete_files = [item["filename"] for item in history if item["department"] == department]
+
     # Remove all history entries for this department
-    global uploaded_files_history
-    uploaded_files_history = [
-        item for item in uploaded_files_history
+    history = [
+        item for item in history
         if item["department"] != department
     ]
-    save_history(uploaded_files_history)
+    save_history(history)
+    
+    # Clean up physical files if they are no longer referenced by any department
+    remaining_files = {item["filename"] for item in history}
+    for fname in to_delete_files:
+        if fname not in remaining_files:
+            fpath = os.path.join(config.UPLOAD_DIR, fname)
+            if os.path.exists(fpath):
+                try:
+                    os.remove(fpath)
+                except Exception:
+                    pass
     return {"status": "success", "message": f"All documents cleared for department: {department}"}
 
 
@@ -208,6 +239,9 @@ def get_departments(x_username: Optional[str] = Header(None)):
 @app.post("/admin/departments/{name}")
 def create_department(name: str, x_username: Optional[str] = Header(None)):
     _require_admin(x_username)
+    if not re.match(r"^[a-zA-Z0-9_-]{3,60}$", name):
+        raise HTTPException(status_code=400, detail="Invalid department name. Must be 3-60 alphanumeric characters.")
+    
     db = load_db()
     if name not in db["departments"]:
         db["departments"][name] = {"status": "active"}

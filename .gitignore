@@ -21,6 +21,7 @@ backend/chroma_db_multi/
 # Runtime files
 backend/history.json
 backend/db.json
+backend/knowledge_graph.db
 
 # Uploaded documents (remove this if uploads are your source documents)
 backend/uploads/

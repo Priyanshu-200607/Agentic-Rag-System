@@ -30,9 +30,7 @@ class DepartmentAgent:
         
         results = collection.query(query_embeddings=query_embedding, n_results=optimal_n_results)
 
-        valid_chunks = []
-        if results['documents'] and results['documents'][0]:
-            valid_chunks.extend(results['documents'][0])
+        valid_chunks = results['documents'][0] if results.get('documents') and results['documents'][0] else []
 
         # --- GRAPH RAG: Get Knowledge Graph Facts ---
         kg_facts = []

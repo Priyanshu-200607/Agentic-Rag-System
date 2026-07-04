@@ -1,0 +1,659 @@
+<!DOCTYPE html><html class="light" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Intelligence Core Admin Dashboard</title>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=Geist:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "secondary-fixed": "#dae2fd",
+            "outline-variant": "#c7c4d8",
+            "primary": "#3525cd",
+            "error": "#ba1a1a",
+            "surface-container-lowest": "#ffffff",
+            "on-surface": "#191c1e",
+            "error-container": "#ffdad6",
+            "on-primary-fixed": "#0f0069",
+            "surface-container-highest": "#e0e3e5",
+            "secondary-fixed-dim": "#bec6e0",
+            "surface-dim": "#d8dadc",
+            "tertiary": "#3e495d",
+            "on-tertiary-fixed": "#111c2d",
+            "outline": "#777587",
+            "tertiary-container": "#566175",
+            "primary-fixed": "#e2dfff",
+            "on-tertiary-fixed-variant": "#3c475a",
+            "on-secondary": "#ffffff",
+            "background": "#f7f9fb",
+            "tertiary-fixed-dim": "#bcc7de",
+            "on-tertiary-container": "#d1dcf4",
+            "surface-bright": "#f7f9fb",
+            "surface-tint": "#4d44e3",
+            "on-secondary-fixed": "#131b2e",
+            "on-tertiary": "#ffffff",
+            "secondary-container": "#dae2fd",
+            "inverse-surface": "#2d3133",
+            "inverse-on-surface": "#eff1f3",
+            "inverse-primary": "#c3c0ff",
+            "on-background": "#191c1e",
+            "surface-container-low": "#f2f4f6",
+            "on-secondary-container": "#5c647a",
+            "tertiary-fixed": "#d8e3fb",
+            "surface-variant": "#e0e3e5",
+            "primary-container": "#4f46e5",
+            "on-primary-fixed-variant": "#3323cc",
+            "on-primary-container": "#dad7ff",
+            "on-error-container": "#93000a",
+            "on-surface-variant": "#464555",
+            "secondary": "#565e74",
+            "surface": "#f7f9fb",
+            "on-primary": "#ffffff",
+            "primary-fixed-dim": "#c3c0ff",
+            "surface-container-high": "#e6e8ea",
+            "on-error": "#ffffff",
+            "surface-container": "#eceef0",
+            "on-secondary-fixed-variant": "#3f465c",
+            "success": "#2e7d32",
+            "success-container": "#c8e6c9",
+            "on-success-container": "#1b5e20",
+            "warning": "#f9a825",
+            "warning-container": "#fff9c4",
+            "on-warning-container": "#f57f17"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "unit": "4px",
+            "stack-lg": "32px",
+            "margin-mobile": "16px",
+            "stack-sm": "8px",
+            "stack-md": "16px",
+            "margin-desktop": "40px",
+            "gutter": "24px",
+            "container-max": "1440px"
+          },
+          "fontFamily": {
+            "label-md": ["Geist"],
+            "headline-md": ["Inter"],
+            "code-sm": ["Geist"],
+            "body-md": ["Inter"],
+            "headline-lg": ["Inter"],
+            "display-lg": ["Inter"],
+            "body-lg": ["Inter"],
+            "headline-lg-mobile": ["Inter"]
+          },
+          "fontSize": {
+            "label-md": ["14px", { "lineHeight": "1.4", "letterSpacing": "0.05em", "fontWeight": "500" }],
+            "headline-md": ["24px", { "lineHeight": "1.3", "fontWeight": "600" }],
+            "code-sm": ["13px", { "lineHeight": "1.5", "fontWeight": "400" }],
+            "body-md": ["16px", { "lineHeight": "1.5", "fontWeight": "400" }],
+            "headline-lg": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+            "display-lg": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+            "body-lg": ["18px", { "lineHeight": "1.6", "fontWeight": "400" }],
+            "headline-lg-mobile": ["24px", { "lineHeight": "1.2", "fontWeight": "600" }]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    body {
+      background-color: #f7f9fb;
+      color: #191c1e;
+      font-family: 'Inter', sans-serif;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+    .glass-effect {
+      backdrop-filter: blur(20px);
+      background: rgba(255, 255, 255, 0.8);
+      border: 1px solid rgba(0, 0, 0, 0.05);
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #e0e3e5;
+      border-radius: 10px;
+    }
+  </style>
+</head>
+<body class="flex min-h-screen">
+<!-- Side Navigation Shell -->
+<aside class="flex flex-col h-screen w-64 fixed left-0 top-0 bg-surface-container/90 backdrop-blur-xl border-r border-outline-variant/30 py-6 px-4 z-20">
+<div class="mb-8 px-2">
+<div class="font-headline-md text-headline-md font-bold text-primary flex items-center gap-2">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">terminal</span>
+        MSFC RAG</div>
+<div class="text-on-surface-variant font-label-md text-sm mt-1">Intelligence Engine</div>
+</div>
+<div class="space-y-1 custom-scrollbar overflow-y-auto flex-1">
+<div class="text-on-surface-variant font-label-md text-xs uppercase tracking-wider mb-2 px-2">Menu</div>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-highest transition-colors font-body-md" href="chat.html">
+<span class="material-symbols-outlined">chat</span>
+        Chat
+      </a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-primary font-bold border-r-2 border-primary bg-primary-fixed/30 font-body-md" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">dashboard</span>
+        Admin Dashboard
+      </a>
+<div class="mt-8 px-2">
+<div class="text-on-surface-variant font-label-md text-xs uppercase tracking-wider mb-2">Upload Files</div>
+<select id="sidebarUploadDept" class="w-full bg-white border border-outline-variant rounded-lg p-2 text-sm focus:ring-2 focus:ring-primary/20 focus:outline-none mb-3">
+<option value="" disabled selected>Select Department...</option>
+</select>
+<div class="border-2 border-dashed border-outline-variant/50 rounded-lg p-3 text-center mb-4 hover:border-primary transition-colors cursor-pointer">
+<input class="hidden" id="file-upload" type="file" multiple>
+<label class="cursor-pointer" for="file-upload">
+<span class="material-symbols-outlined text-outline text-3xl mb-1">cloud_upload</span>
+<p class="text-xs text-on-surface-variant" id="fileLabel">Browse or drag files</p>
+</label>
+</div>
+<div id="sidebarUploadStatus" class="text-xs mb-2 text-center"></div>
+<button onclick="sidebarUpload()" class="w-full bg-success text-white py-2 rounded-lg font-label-md flex items-center justify-center gap-2 hover:opacity-90 transition-opacity">
+<span class="material-symbols-outlined text-sm">upload</span>
+          Upload
+        </button>
+</div>
+<div class="mt-8 px-2">
+<div class="text-on-surface-variant font-label-md text-xs uppercase tracking-wider mb-2">My Access</div>
+<div id="myAccessBadges" class="flex flex-wrap gap-2">
+</div>
+</div>
+<div class="mt-8 px-2">
+<div class="text-on-surface-variant font-label-md text-xs uppercase tracking-wider mb-2">Upload History</div>
+<div class="space-y-2" id="uploadHistoryContainer">
+</div>
+</div>
+</div>
+<div class="mt-auto border-t border-outline-variant/20 pt-4 px-2 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-highest transition-colors font-body-md text-sm" href="#">
+<span class="material-symbols-outlined">settings</span>
+        Settings
+      </a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-on-surface-variant hover:bg-surface-container-highest transition-colors font-body-md text-sm" href="#">
+<span class="material-symbols-outlined">help</span>
+        Support
+      </a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="ml-64 flex-1 flex flex-col min-h-screen">
+<!-- Top Nav Bar Shell -->
+<header class="fixed top-0 right-0 left-64 h-16 bg-surface/80 backdrop-blur-md shadow-sm z-10 flex justify-between items-center px-gutter">
+<div class="flex items-center gap-4">
+<nav class="flex text-on-surface-variant font-label-md text-sm">
+<span class="">Workspace (Role: <span class="font-bold text-primary" id="headerRole">ADMIN</span>)</span>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="bg-error text-white px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-red-700 transition-colors" onclick="logout()">
+          Logout
+        </button>
+</div>
+</header>
+<!-- Canvas Content -->
+<div class="mt-16 p-stack-lg flex-1">
+<div class="max-w-7xl mx-auto space-y-stack-lg">
+<!-- Dashboard Container -->
+<div class="bg-white rounded-xl shadow-sm border border-outline-variant/30 overflow-hidden">
+<!-- Header -->
+<div class="p-6 border-b border-outline-variant/20 flex items-center gap-3">
+<span class="material-symbols-outlined text-primary text-3xl">settings_applications</span>
+<h1 class="text-headline-md font-headline-md text-on-surface">Admin Dashboard</h1>
+</div>
+<!-- Section: Departments -->
+<div class="p-6 space-y-6">
+<div>
+<h2 class="font-headline-md text-lg mb-4 text-on-surface">Departments</h2>
+<div class="flex gap-3 items-center">
+<input id="newDeptInput" class="flex-1 border border-outline-variant/40 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-primary/20 focus:outline-none bg-surface-container-low" placeholder="New department name (e.g. sales)" type="text">
+<button onclick="addDepartment()" class="bg-success text-white px-6 py-2 rounded-lg text-sm font-bold hover:opacity-90 transition-opacity flex items-center gap-2">
+<span class="material-symbols-outlined text-lg">add_circle</span>
+                  Create Department
+                </button>
+</div>
+</div>
+<!-- Departments Table -->
+<div class="overflow-x-auto rounded-lg border border-outline-variant/20">
+<table class="w-full text-left border-collapse">
+<thead class="bg-surface-container-low font-label-md text-on-surface-variant uppercase text-xs tracking-wider">
+<tr>
+<th class="px-6 py-3 font-semibold">Department</th>
+<th class="px-6 py-3 font-semibold">Status</th>
+<th class="px-6 py-3 font-semibold">Action</th>
+</tr>
+</thead>
+<tbody id="deptTableBody" class="divide-y divide-outline-variant/10 text-sm font-body-md">
+</tbody>
+</table>
+</div>
+</div>
+<!-- Section: Users -->
+<div class="p-6 pt-0 space-y-6">
+<div>
+<h2 class="font-headline-md text-lg mb-4 text-on-surface">Users</h2>
+<div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+<input id="newUsername" class="border border-outline-variant/40 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-primary/20 focus:outline-none bg-surface-container-low" placeholder="Username" type="text">
+<input id="newUserPassword" class="border border-outline-variant/40 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-primary/20 focus:outline-none bg-surface-container-low" placeholder="Password" type="password">
+<select id="newUserRole" class="border border-outline-variant/40 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-primary/20 focus:outline-none bg-surface-container-low">
+<option value="employee">Employee</option>
+<option value="manager">Manager</option>
+<option value="admin">Admin</option>
+</select>
+<input id="newUserAccess" class="border border-outline-variant/40 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-primary/20 focus:outline-none bg-surface-container-low" placeholder="Access depts (e.g. hr,it)" type="text">
+<button onclick="addUser()" class="bg-success text-white px-6 py-2 rounded-lg text-sm font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-lg">person_add</span>
+                  Create User
+                </button>
+</div>
+</div>
+<!-- Users Table -->
+<div class="overflow-x-auto rounded-lg border border-outline-variant/20">
+<table class="w-full text-left border-collapse">
+<thead class="bg-surface-container-low font-label-md text-on-surface-variant uppercase text-xs tracking-wider">
+<tr>
+<th class="px-6 py-3 font-semibold">Username</th>
+<th class="px-6 py-3 font-semibold">Role</th>
+<th class="px-6 py-3 font-semibold">Access</th>
+<th class="px-6 py-3 font-semibold">Status</th>
+<th class="px-6 py-3 font-semibold">Actions</th>
+</tr>
+</thead>
+<tbody id="usersTableBody" class="divide-y divide-outline-variant/10 text-sm font-body-md">
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<!-- Atmospheric Element: Subtle background glow -->
+<div class="fixed bottom-0 right-0 w-[600px] h-[600px] bg-primary/5 blur-[120px] rounded-full pointer-events-none -z-10"></div>
+<div class="fixed top-0 left-64 w-[400px] h-[400px] bg-secondary-container/10 blur-[100px] rounded-full pointer-events-none -z-10"></div>
+</div>
+</div>
+</main>
+<script>
+    // Micro-interactions for buttons
+    document.querySelectorAll('button').forEach(button => {
+      button.addEventListener('mousedown', () => {
+        button.style.transform = 'scale(0.96)';
+      });
+      button.addEventListener('mouseup', () => {
+        button.style.transform = 'scale(1)';
+      });
+      button.addEventListener('mouseleave', () => {
+        button.style.transform = 'scale(1)';
+      });
+    });
+
+    // File upload mock interactivity
+    const fileLabel = document.querySelector('label[for="file-upload"]');
+    const fileInput = document.getElementById('file-upload');
+    
+    if (fileInput) {
+      fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+          fileLabel.querySelector('p').textContent = e.target.files[0].name;
+          fileLabel.querySelector('span').textContent = 'check_circle';
+          fileLabel.querySelector('span').style.color = '#2e7d32';
+        }
+      });
+    }
+  </script>
+
+<script>
+    const username = localStorage.getItem('username');
+    const role = localStorage.getItem('role');
+    
+    if (!username || (role !== 'admin' && role !== 'manager')) {
+        window.location.href = 'login.html';
+    }
+
+    function logout() {
+        localStorage.removeItem('username');
+        localStorage.removeItem('role');
+        window.location.href = 'login.html';
+    }
+
+    async function loadAdminHistory() {
+        try {
+            const response = await fetch(`http://127.0.0.1:8000/history?username=${encodeURIComponent(username)}`);
+            const data = await response.json();
+            const container = document.getElementById('uploadHistoryContainer');
+            container.innerHTML = '';
+
+            let filteredHistory = data.history || [];
+            
+            if (filteredHistory.length === 0) {
+                container.innerHTML = "<p class='text-xs text-on-surface-variant px-2'>No files uploaded yet.</p>";
+                return;
+            }
+
+            const grouped = {};
+            filteredHistory.forEach(item => {
+                if (!grouped[item.department]) {
+                    grouped[item.department] = [];
+                }
+                grouped[item.department].push(item);
+            });
+
+            for (const [dept, files] of Object.entries(grouped)) {
+                let filesHtml = files.map(f => `
+                    <div class="flex justify-between items-center py-1.5 border-b border-outline-variant/10 last:border-0">
+                        <span class="text-[11px] text-on-surface truncate pr-2" title="${f.filename}">📄 ${f.filename}</span>
+                        <button onclick="deleteFile('${dept}', '${f.filename}')" class="text-error hover:text-red-700 shrink-0">
+                            <span class="material-symbols-outlined text-[14px]">delete</span>
+                        </button>
+                    </div>
+                `).join('');
+
+                container.innerHTML += `
+                    <details class="bg-white/50 rounded-lg border border-outline-variant/20 overflow-hidden group">
+                        <summary class="flex justify-between items-center p-2 cursor-pointer list-none hover:bg-surface-container-low transition-colors">
+                            <div class="flex items-center gap-2">
+                                <span class="material-symbols-outlined text-warning text-sm group-open:rotate-90 transition-transform">chevron_right</span>
+                                <span class="text-xs font-medium uppercase">${dept} <span class="text-on-surface-variant opacity-60">(${files.length})</span></span>
+                            </div>
+                            <button onclick="clearDepartment(event, '${dept}')" class="text-[10px] text-error font-bold border border-error/20 px-1 rounded hover:bg-error-container shrink-0">Clear</button>
+                        </summary>
+                        <div class="px-3 pb-2 pt-1 bg-surface-container-lowest/50">
+                            ${filesHtml}
+                        </div>
+                    </details>
+                `;
+            }
+        } catch (err) {
+            console.error("Failed to load history", err);
+        }
+    }
+
+    async function deleteFile(dept, filename) {
+        if (!confirm(`Remove ${filename} from ${dept}?`)) return;
+        try {
+            const response = await fetch(`http://127.0.0.1:8000/upload/${dept}/${filename}`, {
+                method: 'DELETE',
+                headers: { 'x-username': username }
+            });
+            const data = await response.json();
+            if (data.status === 'success') loadAdminHistory();
+        } catch (err) {
+            alert("Error deleting file.");
+        }
+    }
+
+    async function clearDepartment(event, dept) {
+        event.preventDefault(); 
+        if (!confirm(`Clear all files from ${dept}?`)) return;
+        try {
+            const response = await fetch(`http://127.0.0.1:8000/upload/${dept}`, {
+                method: 'DELETE',
+                headers: { 'x-username': username }
+            });
+            const data = await response.json();
+            if (data.status === 'success') loadAdminHistory();
+        } catch (err) {
+            alert("Error clearing department.");
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        // Update header role dynamically
+        const headerRole = document.getElementById('headerRole');
+        if (headerRole) headerRole.textContent = (role || 'USER').toUpperCase();
+
+        // Load My Access badges from backend
+        fetch(`http://127.0.0.1:8000/history?username=${encodeURIComponent(username)}`)
+            .then(r => r.json())
+            .then(data => {
+                const badgeContainer = document.getElementById('myAccessBadges');
+                if (badgeContainer && data.allowed && data.allowed.length > 0) {
+                    badgeContainer.innerHTML = data.allowed
+                        .map(d => `<span class="px-2 py-1 bg-secondary-container text-on-secondary-container rounded text-[10px] font-bold">${d.toUpperCase()}</span>`)
+                        .join('');
+                } else if (badgeContainer) {
+                    badgeContainer.innerHTML = '<span class="text-xs text-on-surface-variant">None</span>';
+                }
+            }).catch(() => {});
+
+        loadAdminHistory();
+        loadAdminData();
+        populateSidebarUploadDropdown();
+
+        // File label update on file selection
+        const fileInput = document.getElementById('file-upload');
+        const fileLabel = document.getElementById('fileLabel');
+        if (fileInput && fileLabel) {
+            fileInput.addEventListener('change', () => {
+                fileLabel.textContent = fileInput.files.length > 0
+                    ? `${fileInput.files.length} file(s) selected`
+                    : 'Browse or drag files';
+            });
+        }
+    });
+
+    async function loadAdminData() {
+        const authHeader = { 'x-username': username, 'Cache-Control': 'no-cache' };
+
+        // Departments
+        const deptRes = await fetch(`http://127.0.0.1:8000/admin/departments?t=${Date.now()}`, { headers: authHeader });
+        const departments = await deptRes.json();
+        const deptBody = document.getElementById('deptTableBody');
+        deptBody.innerHTML = '';
+        for(let d in departments) {
+            let status = departments[d].status;
+            let isActive = status === 'active';
+            
+            let statusSpan = isActive 
+                ? '<span class="px-3 py-1 bg-success-container text-on-success-container rounded-full text-xs font-bold">active</span>'
+                : '<span class="px-3 py-1 bg-warning-container text-on-warning-container rounded-full text-xs font-bold">suspended</span>';
+                
+            let actionBtn = isActive
+                ? `<button onclick="toggleDeptSuspend('${d}')" class="bg-warning text-black/80 px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-warning-container transition-colors">Suspend</button>`
+                : `<button onclick="toggleDeptSuspend('${d}')" class="bg-success text-white px-4 py-1.5 rounded-lg text-xs font-bold hover:opacity-90 transition-colors">Activate</button>`;
+
+            deptBody.innerHTML += `
+            <tr class="hover:bg-surface-container-low/30 transition-colors">
+                <td class="px-6 py-4 font-medium uppercase">${d}</td>
+                <td class="px-6 py-4">${statusSpan}</td>
+                <td class="px-6 py-4">${actionBtn}</td>
+            </tr>`;
+        }
+
+        // Users
+        const userRes = await fetch(`http://127.0.0.1:8000/admin/users?t=${Date.now()}`, { headers: authHeader });
+        const users = await userRes.json();
+        const userBody = document.getElementById('usersTableBody');
+        userBody.innerHTML = '';
+        for(let u in users) {
+            let status = users[u].status || 'active';
+            let isActive = status === 'active';
+            
+            let statusSpan = isActive 
+                ? '<span class="px-3 py-1 bg-success-container text-on-success-container rounded-full text-xs font-bold">active</span>'
+                : '<span class="px-3 py-1 bg-warning-container text-on-warning-container rounded-full text-xs font-bold">suspended</span>';
+                
+            let actionBtn = isActive
+                ? `<button onclick="toggleUserSuspend('${u}')" class="bg-warning text-black/80 px-3 py-1.5 rounded text-xs font-bold hover:bg-warning-container transition-colors">Suspend</button>`
+                : `<button onclick="toggleUserSuspend('${u}')" class="bg-success text-white px-3 py-1.5 rounded text-xs font-bold hover:opacity-90 transition-colors">Activate</button>`;
+
+            let deleteBtn = `<button onclick="deleteUser('${u}')" class="bg-error text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-red-700 transition-colors">Delete</button>`;
+
+            userBody.innerHTML += `
+            <tr class="hover:bg-surface-container-low/30 transition-colors">
+                <td class="px-6 py-4 font-bold">${u}</td>
+                <td class="px-6 py-4">${users[u].role}</td>
+                <td class="px-6 py-4">
+                    <div class="flex items-center gap-2">
+                        <input id="acc_${u}" class="bg-white border border-outline-variant/30 rounded px-2 py-1 text-xs w-32 focus:outline-none focus:ring-1 focus:ring-primary" type="text" value="${(users[u].allowed_departments || []).join(',')}">
+                        <button onclick="updateAccess('${u}')" class="bg-primary text-white p-1.5 rounded hover:bg-primary-container transition-colors">
+                            <span class="material-symbols-outlined text-[14px]">save</span>
+                        </button>
+                    </div>
+                </td>
+                <td class="px-6 py-4">${statusSpan}</td>
+                <td class="px-6 py-4">
+                    <div class="flex gap-2">
+                        ${actionBtn}
+                        ${deleteBtn}
+                    </div>
+                </td>
+            </tr>`;
+        }
+    }
+
+    // FIX: /suspend endpoint TOGGLES — no separate /activate endpoint exists
+    async function toggleDeptSuspend(name) {
+        await fetch(`http://127.0.0.1:8000/admin/departments/${name}/suspend`, { method: 'PUT', headers: { 'x-username': username }});
+        loadAdminData();
+    }
+
+    async function toggleUserSuspend(name) {
+        await fetch(`http://127.0.0.1:8000/admin/users/${name}/suspend`, { method: 'PUT', headers: { 'x-username': username }});
+        loadAdminData();
+    }
+
+    async function deleteUser(name) {
+        if(!confirm(`Delete user ${name}?`)) return;
+        await fetch(`http://127.0.0.1:8000/admin/users/${name}`, { method: 'DELETE', headers: { 'x-username': username }});
+        loadAdminData();
+    }
+
+    async function updateAccess(name) {
+        const val = document.getElementById(`acc_${name}`).value;
+        const depts = val.split(',').map(s => s.trim()).filter(s => s);
+        await fetch(`http://127.0.0.1:8000/admin/users/${name}/access`, { 
+            method: 'PUT', 
+            headers: { 'Content-Type': 'application/json', 'x-username': username },
+            body: JSON.stringify({ allowed_departments: depts })
+        });
+        loadAdminData();
+    }
+
+    async function addDepartment() {
+        const nameInput = document.getElementById('newDeptInput');
+        if(!nameInput) return;
+        const name = nameInput.value.trim().toLowerCase();
+        if(!name) return;
+        const res = await fetch(`http://127.0.0.1:8000/admin/departments/${name}`, {
+            method: 'POST',
+            headers: { 'x-username': username }
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            nameInput.value = '';
+            loadAdminData();
+            populateSidebarUploadDropdown();
+        } else {
+            alert('Failed to create department: ' + (data.detail || 'Unknown error'));
+        }
+    }
+
+    async function addUser() {
+        const uInput = document.getElementById('newUsername');
+        const pInput = document.getElementById('newUserPassword');
+        const rSelect = document.getElementById('newUserRole');
+        const aInput = document.getElementById('newUserAccess');
+
+        if(!uInput || !pInput || !rSelect || !aInput) return;
+
+        const newUser = uInput.value.trim().toLowerCase();  // not named 'username' to avoid shadowing
+        const password = pInput.value.trim();
+        const roleVal = rSelect.value;                      // not named 'role' to avoid shadowing
+        const access = aInput.value.trim();
+        const allowed = access ? access.split(',').map(s => s.trim()).filter(s => s) : [];
+
+        if(!newUser || !password) {
+            alert("Username and password required");
+            return;
+        }
+
+        const response = await fetch(`http://127.0.0.1:8000/admin/users`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-username': username },  // 'username' = logged-in admin
+            body: JSON.stringify({
+                username: newUser,
+                password: password,
+                role: roleVal,
+                allowed_departments: allowed
+            })
+        });
+
+        const data = await response.json();
+        if (data.status === 'success') {
+            uInput.value = '';
+            pInput.value = '';
+            aInput.value = '';
+            loadAdminData();
+        } else {
+            alert('Failed to create user: ' + (data.detail || 'Unknown error'));
+        }
+    }
+
+    async function populateSidebarUploadDropdown() {
+        const res = await fetch(`http://127.0.0.1:8000/admin/departments?t=${Date.now()}`, { headers: { 'x-username': username }});
+        const departments = await res.json();
+        const select = document.getElementById('sidebarUploadDept');
+        select.innerHTML = '<option value="" disabled selected>Select Department...</option>';
+        for (let d in departments) {
+            if (departments[d].status === 'active') {
+                select.innerHTML += `<option value="${d}">${d.toUpperCase()}</option>`;
+            }
+        }
+    }
+
+    async function sidebarUpload() {
+        const dept = document.getElementById('sidebarUploadDept').value;
+        const fileInput = document.getElementById('file-upload');
+        const statusDiv = document.getElementById('sidebarUploadStatus');
+
+        if (!dept) { statusDiv.textContent = 'Please select a department.'; statusDiv.style.color = 'red'; return; }
+        if (fileInput.files.length === 0) { statusDiv.textContent = 'Please select files.'; statusDiv.style.color = 'red'; return; }
+
+        statusDiv.textContent = 'Uploading...';
+        statusDiv.style.color = '#3525cd';
+
+        const formData = new FormData();
+        formData.append('department', dept);
+        for (let f of fileInput.files) formData.append('files', f);
+
+        try {
+            const res = await fetch('http://127.0.0.1:8000/upload', {
+                method: 'POST',
+                headers: { 'x-username': username },
+                body: formData
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                statusDiv.textContent = 'Upload successful!';
+                statusDiv.style.color = '#2e7d32';
+                fileInput.value = '';
+                document.getElementById('fileLabel').textContent = 'Browse or drag files';
+                loadAdminHistory();
+            } else {
+                statusDiv.textContent = 'Upload failed.';
+                statusDiv.style.color = 'red';
+            }
+        } catch(e) {
+            statusDiv.textContent = 'Error connecting to server.';
+            statusDiv.style.color = 'red';
+        }
+    }
+</script>
+</body></html>

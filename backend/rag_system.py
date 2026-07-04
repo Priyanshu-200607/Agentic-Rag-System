@@ -35,11 +35,10 @@ class MultiDeptRAG:
         print("Master Agent and Department Agents ready.")
 
     def get_agent(self, department_name):
-        if department_name not in self.agents:
-            self.agents[department_name] = DepartmentAgent(
-                department_name, self.client, self.embed_model, self.llm_model_name, self.kg
-            )
-        return self.agents[department_name]
+        return self.agents.setdefault(
+            department_name,
+            DepartmentAgent(department_name, self.client, self.embed_model, self.llm_model_name, self.kg)
+        )
 
     def admin_upload_to_department(self, department_name, file_paths, chunk_size=500, overlap=100):
         collection_name = get_collection_name(department_name)
@@ -89,22 +88,31 @@ class MultiDeptRAG:
                     print(f"-> Extracting knowledge graph facts in batches of {current_batch_size}...")
                     
                     i = 0
+
                     while i < len(docs):
-                        # Active Backpressure: Check RAM/VRAM before processing batch
                         current_batch_size = ResourceManager.check_memory_pressure(current_batch_size)
-                        
                         batch = docs[i:i + current_batch_size]
-                        self.kg.extract_from_texts(batch, dept)
                         
+                        facts = self.kg.extract_from_texts(batch, dept)
+                        if facts:
+                            embeddings = self.embed_model.encode(facts, show_progress_bar=False).tolist()
+                            ids = [f"{dept}_kg_{i}_{j}" for j in range(len(facts))]
+                            metadatas = [{"source": "knowledge_graph", "department": dept, "type": "kg_fact"} for _ in range(len(facts))]
+                            try:
+                                col = self.client.get_collection(name=get_collection_name(dept))
+                                col.add(ids=ids, documents=facts, embeddings=embeddings, metadatas=metadatas)
+                            except Exception as e:
+                                print(f"Failed to add KG facts to Chroma: {e}")
+                                
                         i += current_batch_size
-                        
                         if i % (current_batch_size * 5) == 0 or i >= len(docs):
                             print(f"[BACKGROUND TASK] KG extraction progress: {min(i, len(docs))}/{len(docs)} chunks done")
+
                     
                     self.kg.invalidate_cache()
                     
                     # Unload REBEL from the GPU to free up VRAM for Ollama
-                    import backend.kg_system as kgs
+                    import kg_system as kgs
                     if hasattr(kgs, 'unload_rebel'):
                         kgs.unload_rebel()
                         
@@ -177,105 +185,19 @@ class MultiDeptRAG:
             pass
         return allowed_departments
 
-    def execute_text_to_sql(self, query, allowed_departments):
-        import re
-        
-        schema = """
-        CREATE TABLE edges (
-            source TEXT, 
-            relation TEXT, 
-            target TEXT, 
-            department TEXT,
-            PRIMARY KEY (source, relation, target)
-        )
-        """
-        prompt = f"""
-        You are a SQL generator. Write a SQLite query to answer the user's question based on the following schema:
-        {schema}
-        
-        Allowed departments for this user: {', '.join(allowed_departments)}
-        (If the query filters by department, it MUST only include allowed departments).
-        
-        User Query: {query}
-        
-        Return ONLY the raw SQL query inside a ```sql ... ``` block. Do not include any explanations.
-        """
-        
-        response = chat(
-            model=self.llm_model_name,
-            messages=[{"role": "user", "content": prompt}],
-            options={"temperature": 0.0}
-        )
-        
-        sql_match = re.search(r"```sql(.*?)```", response.message.content, re.DOTALL | re.IGNORECASE)
-        if not sql_match:
-            # Fallback if the model forgot the markdown block
-            sql = response.message.content.strip()
-        else:
-            sql = sql_match.group(1).strip()
-            
-        try:
-            with self.kg._write_lock:
-                cursor = self.kg.conn.cursor()
-                cursor.execute(sql)
-                rows = cursor.fetchall()
-                
-            if not rows:
-                return "The database query returned no results."
-                
-            return f"Database results: {rows}"
-        except Exception as e:
-            return f"Failed to execute analytical query. (SQL Error: {e})"
-
     def process_request(self, query, username):
         from auth import load_db
         db = load_db()
+        users = db.get("users", {})
+        if username not in users:
+            return "User not found."
 
-        if username not in db["users"]:
-            return "Access Denied: User not found."
-
-        user = db["users"][username]
-        if user.get("status") == "suspended":
-            return "Access Denied: Your account is suspended."
-
-        allowed_departments = user.get("allowed_departments", [])
+        allowed_departments = users[username].get("allowed_departments", [])
         if not allowed_departments:
-            return "Access Denied: You do not have permission for any departments."
+            return "You do not have access to any departments."
 
-        # Phase 3: Agentic Routing (Analytical vs Factual)
-        intent_prompt = f"""
-        Classify the following query as 'analytical' (requires counting, sums, averages, exact numbers, or scanning across the entire database) or 'factual' (asking for specific knowledge, definitions, rules, or single facts).
-        Query: {query[:500]}
-        Return ONLY the word 'analytical' or 'factual'.
-        """
-        intent_response = chat(
-            model=self.llm_model_name,
-            messages=[{"role": "user", "content": intent_prompt}],
-            options={"temperature": 0.0}
-        )
-        is_analytical = "analytical" in intent_response.message.content.lower()
-
-        if is_analytical:
-            print(f"Routing to Text-to-SQL Tool for query: {query}")
-            sql_result = self.execute_text_to_sql(query, allowed_departments)
-            
-            synthesis_prompt = f"""
-            You are a Master Agent. The user asked an analytical question. A SQL query was run against the graph database to answer it.
-            Based ONLY on the Database Results, formulate a clear, natural language answer to the user's question.
-            
-            User Query: {query[:config.MAX_QUERY_CHARS]}
-            Database Results: {sql_result}
-            """
-            final_response = chat(
-                model=self.llm_model_name,
-                messages=[{"role": "user", "content": synthesis_prompt}],
-                options={"temperature": 0.0}
-            )
-            return final_response.message.content
-
-        # Standard Vector + KG RAG Pipeline
         target_departments = self.route_query(query, allowed_departments)
-
+        
         active_target_departments = [
             dept for dept in target_departments
             if dept in db.get("departments", {}) and db["departments"][dept].get("status", "active") == "active"
@@ -284,7 +206,6 @@ class MultiDeptRAG:
         if not active_target_departments:
             return "Query blocked: The requested departments are currently suspended or offline."
 
-        # Collect responses
         successful_responses = {}
         failed_departments = []
         
@@ -296,34 +217,12 @@ class MultiDeptRAG:
                 successful_responses[dept] = resp
 
         if not successful_responses:
-            failed_str = ", ".join(failed_departments)
-            return f"I don't know. (Debug: Subqueries failed for departments: {failed_str})"
-
-        synthesis_prompt = f"""
-        You are a Master Agent. Synthesize a unified, coherent response to the user's query based ONLY on the department agents' answers below.
-
-        Important Rules:
-        1. You must ONLY formulate an answer using the provided Responses. Do not use external knowledge.
-        2. Combine the information into a single clear answer.
-        3. Do NOT mention that a department did not have information.
-
-        User Query: {query[:config.MAX_QUERY_CHARS]}
-
-        Responses:
-        """
-        for dept, resp in successful_responses.items():
-            synthesis_prompt += f"\n- {dept.upper()}: {resp}"
-
-        synthesis_prompt += "\n\nSynthesized Final Answer:"
-
-        final_response = chat(
-            model=self.llm_model_name,
-            messages=[{"role": "user", "content": synthesis_prompt}],
-            options={"temperature": 0.0}
-        )
-        
-        final_text = final_response.message.content
-        if failed_departments:
-            final_text += f"\n\nNote: The {', '.join(failed_departments)} department(s) did not have any relevant information for this query."
+            if failed_departments:
+                return f"I could not find a relevant answer in the following departments: {', '.join(failed_departments)}."
+            return "Based on the available data, I could not find an answer to your question."
             
-        return final_text
+        final_answer = ""
+        for dept, resp in successful_responses.items():
+            final_answer += f"[{dept.upper()}] {resp}\n\n"
+            
+        return final_answer.strip()
