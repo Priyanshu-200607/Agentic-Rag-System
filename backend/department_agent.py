@@ -21,8 +21,16 @@ class DepartmentAgent:
         
         query_embedding = self.embed_model.encode([query_text]).tolist()
         results = collection.query(query_embeddings=query_embedding, n_results=15)
-        valid_chunks = results['documents'][0] if results.get('documents') and results['documents'][0] else []
-        return "\n".join(valid_chunks)
+        
+        chunks = []
+        if results.get('documents') and results['documents'][0]:
+            docs = results['documents'][0]
+            metas = results['metadatas'][0] if results.get('metadatas') and results['metadatas'][0] else [{}] * len(docs)
+            for doc, meta in zip(docs, metas):
+                source = meta.get('source', 'Unknown')
+                chunks.append(f"[Source: {source}]\n{doc}")
+                
+        return "\n\n".join(chunks) if chunks else "No documents found."
 
     def search_knowledge_graph(self, entity):
         if not self.kg:
@@ -53,8 +61,16 @@ class DepartmentAgent:
             where_document={"$contains": keyword},
             limit=15
         )
-        valid_chunks = results['documents'] if results and results.get('documents') else []
-        return "\n".join(valid_chunks) if valid_chunks else "No exact matches found."
+        
+        chunks = []
+        if results and results.get('documents'):
+            docs = results['documents']
+            metas = results['metadatas'] if results.get('metadatas') else [{}] * len(docs)
+            for doc, meta in zip(docs, metas):
+                source = meta.get('source', 'Unknown')
+                chunks.append(f"[Source: {source}]\n{doc}")
+                
+        return "\n\n".join(chunks) if chunks else "No exact matches found."
 
     def query(self, query_text, distance_threshold=1.5):
         query_text_safe = query_text[:config.MAX_QUERY_CHARS]
@@ -65,6 +81,10 @@ Available tools:
 1. search_vector_db(query): Good for semantic searches, policies, general text.
 2. search_knowledge_graph(entity): Good for exploring entity relationships.
 3. search_exact_text(keyword): Good for EXACT substring matches like log IDs ('sync_salesforce_45'), exact dates, or specific acronyms ('CAC'). Use this if vector search fails to find a specific ID.
+
+IMPORTANT RESOLUTION RULE:
+If you see conflicting information across chunks, look at the [Source: filename] metadata. 
+ALWAYS prioritize files with "current" or newer years (e.g. 2025) over files with "past", "archived", or older years (e.g. 2023).
 
 To use a tool, output exactly in this format:
 Action: tool_name
