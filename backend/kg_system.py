@@ -184,18 +184,32 @@ class KnowledgeGraph:
             return []
             
         extracted_facts = []
-        if config.ADAPTIVE_KG_EXTRACTION and ResourceManager.get_device() != "cpu":
-            print("[BACKGROUND TASK] Using LLM for High-Quality KG Extraction...")
+        
+        # Check actual VRAM to determine if LLM extraction is feasible for speed
+        vram_gb = 0
+        if ResourceManager.get_device() == "cuda":
+            try:
+                import torch
+                vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            except Exception:
+                pass
+                
+        # Only use slow LLM extraction if ADAPTIVE is True AND we have massive VRAM (>20GB)
+        # Otherwise, fallback to the ultra-fast REBEL model for consumer GPUs/laptops.
+        if config.ADAPTIVE_KG_EXTRACTION and vram_gb >= 20:
+            print("[BACKGROUND TASK] Using LLM (llama3) for High-Quality KG Extraction...")
             extracted_facts = self._extract_with_llm(texts, department_name)
         else:
-            print("[BACKGROUND TASK] Using REBEL for Fast KG Extraction...")
+            print(f"[BACKGROUND TASK] Detected {vram_gb:.1f}GB VRAM. Using REBEL for Fast KG Extraction...")
             extracted_facts = self._extract_with_rebel(texts, department_name)
             
         return extracted_facts
         
     def _extract_with_llm(self, texts, department_name="global"):
         extracted_facts = []
-        for text in texts:
+        for idx, text in enumerate(texts):
+            if idx % 5 == 0:
+                print(f"[LLM Extraction] Processing chunk {idx + 1}/{len(texts)} in current batch...")
             prompt = f"""
             Extract knowledge graph triples from the following text.
             Format exactly as:

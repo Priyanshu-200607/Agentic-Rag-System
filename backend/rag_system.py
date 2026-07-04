@@ -105,8 +105,7 @@ class MultiDeptRAG:
                                 print(f"Failed to add KG facts to Chroma: {e}")
                                 
                         i += current_batch_size
-                        if i % (current_batch_size * 5) == 0 or i >= len(docs):
-                            print(f"[BACKGROUND TASK] KG extraction progress: {min(i, len(docs))}/{len(docs)} chunks done")
+                        print(f"[BACKGROUND TASK] KG extraction progress: {min(i, len(docs))}/{len(docs)} chunks done")
 
                     
                     self.kg.invalidate_cache()
