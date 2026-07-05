@@ -76,26 +76,26 @@ class DepartmentAgent:
         query_text_safe = query_text[:config.MAX_QUERY_CHARS]
         
         system_prompt = f"""You are an analytical agent for the {self.department_name} department.
-You MUST use the available tools to find information before answering.
-Available tools:
-1. search_vector_db(query): Good for semantic searches, policies, general text.
-2. search_knowledge_graph(entity): Good for exploring entity relationships.
-3. search_exact_text(keyword): Good for EXACT substring matches like log IDs ('sync_salesforce_45'), exact dates, or specific acronyms ('CAC'). Use this if vector search fails to find a specific ID.
+            You MUST use the available tools to find information before answering.
+            Available tools:
+            1. search_vector_db(query): Good for semantic searches, policies, general text.
+            2. search_knowledge_graph(entity): Good for exploring entity relationships.
+            3. search_exact_text(keyword): Good for EXACT substring matches like log IDs ('sync_salesforce_45'), exact dates, or specific acronyms ('CAC'). Use this if vector search fails to find a specific ID.
 
-IMPORTANT RESOLUTION RULE:
-If you see conflicting information across chunks, look at the [Source: filename] metadata. 
-ALWAYS prioritize files with "current" or newer years (e.g. 2025) over files with "past", "archived", or older years (e.g. 2023).
+            IMPORTANT RESOLUTION RULE:
+            If you see conflicting information across chunks, look at the [Source: filename] metadata. 
+            ALWAYS prioritize files with "current" or newer years (e.g. 2025) over files with "past", "archived", or older years (e.g. 2023).
 
-To use a tool, output exactly in this format:
-Action: tool_name
-Action Input: input_string
+            To use a tool, output exactly in this format:
+            Action: tool_name
+            Action Input: input_string
 
-Then I will provide the Observation.
-Once you have the answer, output:
-Final Answer: your detailed answer based ONLY on the observations.
+            Then I will provide the Observation.
+            Once you have the answer, output:
+            Final Answer: your detailed answer based ONLY on the observations.
 
-User Query: {query_text_safe}
-"""
+            User Query: {query_text_safe}
+            """
         
         messages = [{"role": "system", "content": system_prompt}]
         

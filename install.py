@@ -92,12 +92,14 @@ def main():
         "python-multipart==0.0.9",
         "python-jose==3.3.0",
         "passlib[bcrypt]==1.7.4",
-        "chromadb==0.4.24",
-        "ollama==0.1.7",
+        "chromadb>=0.5.0",
+        "ollama>=0.1.7",
         "pypdf==4.1.0",
         "python-docx==1.1.0",
         "psutil==5.9.8",
-        "sentence-transformers==2.5.1"
+        "sentence-transformers==2.5.1",
+        "numpy>=2.0.0",
+        "scipy>=1.14.0"
     ]
     
     # Install core packages safely
@@ -105,28 +107,28 @@ def main():
 
     print_header("Installing OS-Specific AI Acceleration Libraries")
     if is_linux_or_server or is_windows:
-        print("Installing PyTorch 2.2.1 with CUDA 12.1 support...")
+        print("Installing PyTorch (latest compatible) with CUDA 12.1 support...")
         # PyTorch with CUDA support (Crucial for Linux, Server, and Windows with NVIDIA GPUs)
         run_cmd([
             pip_exe, "install", 
-            "torch==2.2.1+cu121", 
-            "torchvision==0.17.1+cu121", 
-            "torchaudio==2.2.1+cu121", 
+            "torch", 
+            "torchvision", 
+            "torchaudio", 
             "--index-url", "https://download.pytorch.org/whl/cu121"
         ], cwd=backend_dir)
         
         # Bitsandbytes for 8-bit LLM optimization (highly recommended for Linux/Server)
         print("Installing bitsandbytes optimization (8-bit quantization)...")
-        run_cmd([pip_exe, "install", "bitsandbytes==0.43.0"], cwd=backend_dir)
+        run_cmd([pip_exe, "install", "bitsandbytes>=0.43.0"], cwd=backend_dir)
         
     elif is_mac:
-        print("Installing PyTorch 2.2.1 with Native MPS (Apple Silicon) Support...")
+        print("Installing PyTorch (latest compatible) with Native MPS (Apple Silicon) Support...")
         # PyTorch standard install contains native Apple Silicon (MPS) acceleration out of the box
         run_cmd([
             pip_exe, "install", 
-            "torch==2.2.1", 
-            "torchvision==0.17.1", 
-            "torchaudio==2.2.1"
+            "torch>=2.2.1", 
+            "torchvision>=0.17.1", 
+            "torchaudio>=2.2.1"
         ], cwd=backend_dir)
         print("Note: bitsandbytes is not supported on Mac. 8-bit quantization will be bypassed automatically.")
 
@@ -155,7 +157,7 @@ def main():
         print("2. Activate env:  env\\Scripts\\activate")
     else:
         print("2. Activate env:  source env/bin/activate")
-    print("3. Start server:  uvicorn api:app --reload")
+    print('3. Start server:  uvicorn api:app --reload --reload-exclude "env/*"')
     
 if __name__ == "__main__":
     main()
