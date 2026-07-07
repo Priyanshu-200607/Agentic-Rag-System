@@ -186,9 +186,9 @@ class KnowledgeGraph:
             
         extracted_facts = []
         
-        # Check actual VRAM to determine if LLM extraction is feasible for speed
+        device = ResourceManager.get_device()
         vram_gb = 0
-        if ResourceManager.get_device() == "cuda":
+        if device == "cuda":
             try:
                 import torch
                 vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
@@ -196,8 +196,8 @@ class KnowledgeGraph:
                 pass
                 
         # Only use slow LLM extraction if ADAPTIVE is True AND we have massive VRAM (>20GB)
-        # Otherwise, fallback to the ultra-fast REBEL model for consumer GPUs/laptops.
-        if config.ADAPTIVE_KG_EXTRACTION and vram_gb >= 20:
+        # Or if we are on a Mac (mps) because REBEL is extremely slow on Apple Silicon
+        if config.ADAPTIVE_KG_EXTRACTION and (vram_gb >= 20 or device == "mps"):
             print("[BACKGROUND TASK] Using LLM (llama3) for High-Quality KG Extraction...")
             extracted_facts = self._extract_with_llm(texts, department_name)
         else:
