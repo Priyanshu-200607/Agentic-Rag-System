@@ -80,8 +80,8 @@ async def upload(
     if user.get("status") == "suspended":
         raise HTTPException(status_code=403, detail="Forbidden: Your account is suspended.")
 
-    if not re.match(r"^[a-zA-Z0-9_-]{3,60}$", department):
-        raise HTTPException(status_code=400, detail="Invalid department name. Must be 3-60 alphanumeric characters.")
+    if not re.match(r"^[a-zA-Z0-9_-]{2,60}$", department):
+        raise HTTPException(status_code=400, detail="Invalid department name. Must be 2-60 alphanumeric characters.")
 
     if department not in db["departments"]:
         db["departments"][department] = {"status": "active"}
@@ -239,8 +239,8 @@ def get_departments(x_username: Optional[str] = Header(None)):
 @app.post("/admin/departments/{name}")
 def create_department(name: str, x_username: Optional[str] = Header(None)):
     _require_admin(x_username)
-    if not re.match(r"^[a-zA-Z0-9_-]{3,60}$", name):
-        raise HTTPException(status_code=400, detail="Invalid department name. Must be 3-60 alphanumeric characters.")
+    if not re.match(r"^[a-zA-Z0-9_-]{2,60}$", name):
+        raise HTTPException(status_code=400, detail="Invalid department name. Must be 2-60 alphanumeric characters.")
     
     db = load_db()
     if name not in db["departments"]:

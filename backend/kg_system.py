@@ -1,6 +1,7 @@
 import networkx as nx
 import sqlite3
 import re
+from tqdm import tqdm
 import threading
 import json
 from collections import defaultdict
@@ -207,9 +208,7 @@ class KnowledgeGraph:
         
     def _extract_with_llm(self, texts, department_name="global"):
         extracted_facts = []
-        for idx, text in enumerate(texts):
-            if idx % 5 == 0:
-                print(f"[LLM Extraction] Processing chunk {idx + 1}/{len(texts)} in current batch...")
+        for text in tqdm(texts, desc="Extracting KG Facts (LLM)"):
             prompt = f"""
             Extract knowledge graph triples from the following text.
             Format exactly as:
@@ -257,7 +256,7 @@ class KnowledgeGraph:
             decoded_texts = tokenizer.batch_decode(generated_tokens, skip_special_tokens=False)
             
             # Parse the text into clean dictionaries and store
-            for decoded_text in decoded_texts:
+            for decoded_text in tqdm(decoded_texts, desc="Parsing REBEL Triples"):
                 relations = parse_rebel_output(decoded_text)
                 for rel in relations:
                     fact = self.add_relationship(rel['head'], rel['type'], rel['tail'], department_name)

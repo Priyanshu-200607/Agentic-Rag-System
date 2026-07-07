@@ -2,6 +2,7 @@ import json
 import uuid
 import time
 import threading
+from tqdm import tqdm
 from sentence_transformers import SentenceTransformer
 import chromadb
 from ollama import chat
@@ -48,7 +49,7 @@ class MultiDeptRAG:
         metadatas = []
         step = chunk_size - overlap
 
-        for path in file_paths:
+        for path in tqdm(file_paths, desc="Processing Documents"):
             path = path.strip()
             text = process_file(path)
             if not text:
@@ -65,7 +66,7 @@ class MultiDeptRAG:
             ids = [str(uuid.uuid4()) for _ in range(len(documents))]
 
             batch_size = ResourceManager.get_optimal_batch_sizes()["chroma_batch"]
-            for i in range(0, len(documents), batch_size):
+            for i in tqdm(range(0, len(documents), batch_size), desc="Storing Vectors"):
                 collection.add(
                     ids=ids[i:i+batch_size],
                     documents=documents[i:i+batch_size],

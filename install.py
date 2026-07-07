@@ -157,7 +157,7 @@ def main():
         print("2. Activate env:  env\\Scripts\\activate")
     else:
         print("2. Activate env:  source env/bin/activate")
-    print('3. Start server:  uvicorn api:app --reload --reload-exclude "env/*"')
+    print('3. Start server:  uvicorn api:app')
     
 if __name__ == "__main__":
     main()
