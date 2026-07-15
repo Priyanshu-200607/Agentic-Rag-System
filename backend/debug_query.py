@@ -24,7 +24,8 @@ for dept in ["hr", "it", "finance"]:
 print("\n--- DEBUGGING KNOWLEDGE GRAPH ---")
 kg = KnowledgeGraph()
 print("\nExtracting entities from query...")
-entities = kg._extract_entities_cached(query, "gemma2:2b")
+import config
+entities = kg._extract_entities_cached(query, config.LLM_MODEL_NAME)
 print(f"Extracted Entities: {entities}")
 
 print("\nCanonicalizing entities...")
