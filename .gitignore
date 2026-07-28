@@ -55,3 +55,11 @@ report.md
 
 # Side stuff
 side stuff/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Downloaded Models
+backend/embedding_model/
+

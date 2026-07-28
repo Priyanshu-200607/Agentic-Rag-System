@@ -9,3 +9,5 @@ ollama
 pypdf
 python-docx
 psutil
+langchain-text-splitters
+huggingface-hub

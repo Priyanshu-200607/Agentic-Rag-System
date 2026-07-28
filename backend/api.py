@@ -11,6 +11,9 @@ from typing import Optional
 import config
 import re
 import uuid
+import threading
+
+history_lock = threading.Lock()
 
 app = FastAPI()
 
@@ -22,7 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
+frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
 system = MultiDeptRAG()
 
 @app.post("/login")
@@ -90,22 +93,23 @@ async def upload(
     os.makedirs(config.UPLOAD_DIR, exist_ok=True)
     saved_paths = []
     
-    history = load_history()
-    
-    for file in files:
-        safe_filename = os.path.basename(file.filename)
-        file_path = os.path.join(config.UPLOAD_DIR, safe_filename)
-        with open(file_path, "wb") as buffer:
-            import shutil
-            shutil.copyfileobj(file.file, buffer)
-        saved_paths.append(file_path)
-        history.append({"filename": safe_filename, "department": department})
+    with history_lock:
+        history = load_history()
+        
+        for file in files:
+            safe_filename = os.path.basename(file.filename)
+            file_path = os.path.join(config.UPLOAD_DIR, safe_filename)
+            with open(file_path, "wb") as buffer:
+                import shutil
+                shutil.copyfileobj(file.file, buffer)
+            saved_paths.append(file_path)
+            history.append({"filename": safe_filename, "department": department})
 
-    # Fix #7: Cap history to prevent unbounded RAM and file growth
-    if len(history) > config.HISTORY_MAX_ENTRIES:
-        del history[:-config.HISTORY_MAX_ENTRIES]
+        # Cap history to prevent unbounded RAM and file growth
+        if len(history) > config.HISTORY_MAX_ENTRIES:
+            del history[:-config.HISTORY_MAX_ENTRIES]
 
-    save_history(history)
+        save_history(history)
 
     system.admin_upload_to_department(department, saved_paths)
     return {"status": "success"}
@@ -259,8 +263,12 @@ def toggle_suspend_department(name: str, x_username: Optional[str] = Header(None
     return {"status": "success"}
 
 
-@app.get("/")
-def root():
-    return FileResponse(os.path.join(frontend_path, "login.html"))
+# SPA Catch-all routing for React Router
+app.mount("/assets", StaticFiles(directory=os.path.join(frontend_path, "assets")), name="assets")
 
-app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+@app.get("/{catchall:path}")
+def serve_spa(catchall: str):
+    file_path = os.path.join(frontend_path, catchall)
+    if os.path.isfile(file_path):
+        return FileResponse(file_path)
+    return FileResponse(os.path.join(frontend_path, "index.html"))

@@ -47,15 +47,17 @@ class MultiDeptRAG:
 
         documents = []
         metadatas = []
-        step = chunk_size - overlap
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=overlap)
 
         for path in tqdm(file_paths, desc="Processing Documents"):
             path = path.strip()
             text = process_file(path)
             if not text:
                 continue
-            for i in range(0, len(text), step):
-                chunk = text[i:i + chunk_size]
+            
+            chunks = splitter.split_text(text)
+            for chunk in chunks:
                 if chunk.strip():
                     documents.append(chunk)
                     metadatas.append({"source": path, "department": department_name})
@@ -185,6 +187,38 @@ class MultiDeptRAG:
             pass
         return allowed_departments
 
+    def evaluate_response(self, query, draft_answer):
+        prompt = f"""
+        You are the Master Reviewer. 
+        The user asked: '{query}'
+        The Department Agent answered: '{draft_answer}'
+        
+        Rate how thoroughly this answers the user's original question on a scale of 1 to 10.
+        If the score is below 8, provide specific feedback on what is missing or what needs to be searched.
+        
+        Output EXACTLY in this JSON format:
+        {{"score": 8, "feedback": "good"}}
+        """
+        try:
+            response = chat(
+                model=self.llm_model_name,
+                messages=[{"role": "user", "content": prompt}],
+                options={"temperature": 0.0}
+            )
+            content = response.message.content
+            import re
+            match = re.search(r'\{.*\}', content, re.DOTALL)
+            if match:
+                import json
+                data = json.loads(match.group(0))
+                score = int(data.get("score", 10))
+                feedback = data.get("feedback", "")
+                return {"score": score, "feedback": feedback}
+        except Exception as e:
+            print(f"Evaluation Error: {e}")
+        # Default to pass if evaluator fails to avoid breaking
+        return {"score": 10, "feedback": ""}
+
     def process_request(self, query, username):
         from auth import load_db
         db = load_db()
@@ -210,11 +244,35 @@ class MultiDeptRAG:
         failed_departments = []
         
         for dept in active_target_departments:
-            resp = self.get_agent(dept).query(query)
-            if "I don't know" in resp or "No relevant information found" in resp or "No documents found" in resp:
-                failed_departments.append(dept)
+            agent = self.get_agent(dept)
+            current_query = query
+            best_resp = ""
+            success = False
+            
+            for attempt in range(2): # Max 2 attempts to prevent infinite loop
+                resp = agent.query(current_query)
+                
+                if "I don't know" in resp or "No relevant information found" in resp or "No documents found" in resp:
+                    if attempt == 1:
+                        break # Failed on last attempt
+                    # Give it a generic push if it failed completely
+                    current_query = f"Original Query: {query}\nFeedback: Your previous search yielded no results. Try searching for different keywords or exact entity names."
+                    continue
+                
+                evaluation = self.evaluate_response(query, resp)
+                best_resp = resp
+                
+                if evaluation["score"] >= 8:
+                    success = True
+                    break
+                else:
+                    current_query = f"Original Query: {query}\nFeedback on previous answer: {evaluation['feedback']}\nPlease use your tools to search again focusing on the feedback."
+            
+            # Add to successful responses if we have a valid answer
+            if best_resp and "I don't know" not in best_resp and "No documents found" not in best_resp:
+                successful_responses[dept] = best_resp
             else:
-                successful_responses[dept] = resp
+                failed_departments.append(dept)
 
         if not successful_responses:
             if failed_departments:

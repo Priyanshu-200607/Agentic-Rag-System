@@ -112,6 +112,7 @@ class KnowledgeGraph:
 
     def _init_db(self):
         self.conn = sqlite3.connect(KG_DB_FILE, check_same_thread=False)
+        self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS edges (
                 source TEXT, relation TEXT, target TEXT, department TEXT,
@@ -283,7 +284,14 @@ class KnowledgeGraph:
                 model=llm_model_name,
                 messages=[{"role": "user", "content": prompt}]
             )
-            entities = tuple(e.strip().lower() for e in response.message.content.split(','))
+            content = response.message.content
+            # Regex fallback to clean conversational clutter
+            if ":" in content and "," in content:
+                content = content.split(":")[-1]
+            
+            # Remove brackets or quotes if present
+            content = content.replace("[", "").replace("]", "").replace('"', "").replace("'", "")
+            entities = tuple(e.strip().lower() for e in content.split(',') if len(e.strip()) > 1)
         except Exception as e:
             print(f"KG Retrieval Error: {e}")
             entities = tuple()

@@ -117,7 +117,8 @@ flowchart TD
 | Vector Store | ChromaDB | Per-department semantic search |
 | Graph Storage | SQLite + NetworkX | Persistent + in-RAM knowledge graph traversal |
 | Relation Extraction | REBEL / LLM (adaptive) | Builds entity-relationship triplets |
-| Frontend | Vanilla HTML/JS | Lightweight chat + admin UI, served via FastAPI |
+| Frontend | React + Vite + Tailwind CSS | Interactive chat & admin UI |
+| Website | React + Three.js + Framer Motion | Landing page |
 | Config | `config.py` + `entities.json` | Centralized settings and domain entity patterns |
 
 ---
@@ -125,44 +126,64 @@ flowchart TD
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Python 3.9+
+- Python 3.9+ (if running manually)
+- Docker & Docker Compose (recommended)
+- Node.js (for running UI dev servers)
 - [Ollama](https://ollama.com/) installed and running locally with your chosen model (default: `llama3`)
 
-### Installation
+### Installation & Running (Docker - Recommended)
 
 ```bash
 # 1. Clone the repository
 git clone <your-repo-url>
 cd department_rag
 
-# 2. Run the interactive auto-installer
-python install.py
+# 2. Build the frontend for the backend to serve
+cd frontend
+npm install
+npm run build
+cd ..
+
+# 3. Start services with Docker Compose
+docker-compose up --build -d
 ```
+Then open **http://localhost:8000** in your browser.
 
-The installer detects your OS (Windows/Mac/Linux/Server) and provisions a virtual environment with pinned, conflict-free dependencies and the correct hardware-accelerated PyTorch build (CUDA/MPS).
+### Installation & Running (Manual)
 
-### Running the Server
+If you prefer not to use Docker, use the auto-installer to set up the backend:
 
 ```bash
+# 1. Run the interactive auto-installer (creates env/)
+python install.py
+
+# 2. Start the Backend API
 cd backend
-
-# Linux/Mac
-source env/bin/activate
-
-# Windows
-env\Scripts\activate
-
-# Start the API
+# Linux/Mac: source env/bin/activate
+# Windows: env\Scripts\activate
 uvicorn api:app --reload
 ```
 
-Then open **http://localhost:8000** in your browser.
+In a separate terminal, start the Frontend Development Server:
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+*(Optional)* You can also explore the Landing Page website:
+```bash
+cd website
+npm install
+npm run dev
+```
 
 ### Try It Out
 
-1. Log in as `admin` (password: `123`) to unlock upload permissions.
-2. Upload `.txt`, `.pdf`, or `.docx` files to a specific department (HR, Finance, IT) via the sidebar.
-3. Log out and log back in as a different role (e.g., `intern`, `hr_guy`) to see RBAC and intelligent routing in action.
+1. Open the Chat/Admin UI in your browser (at `http://localhost:8000` via Docker, or the Vite URL like `http://localhost:5173` via manual run).
+2. Log in as `admin` (password: `123`) to unlock upload permissions.
+3. Upload `.txt`, `.pdf`, or `.docx` files to a specific department (HR, Finance, IT) via the sidebar.
+4. Log out and log back in as a different role (e.g., `intern`, `hr_guy`) to see RBAC and intelligent routing in action.
 
 ---
 
@@ -193,10 +214,13 @@ department_rag/
 │   ├── department_agent.py   # Per-department ReAct agent
 │   ├── resource_manager.py   # Hardware-aware extraction switching
 │   ├── config.py             # Centralized configuration
+│   ├── Dockerfile            # Container configuration
 │   └── entities.json         # Domain-specific KG entity patterns
-├── frontend/                  # Vanilla HTML/JS chat & admin UI
-├── install.py                 # Cross-platform auto-installer
-└── report.md                  # Original architectural proposal
+├── frontend/                 # React + Vite Chat & Admin UI
+├── website/                  # React + Three.js Landing Page
+├── docker-compose.yml        # Docker Compose configuration
+├── install.py                # Cross-platform auto-installer
+└── report.md                 # Original architectural proposal
 ```
 
 ---

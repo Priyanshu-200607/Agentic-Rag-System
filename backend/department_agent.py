@@ -13,22 +13,29 @@ class DepartmentAgent:
         self.collection_name = f"dept_{department_name}"
         self.kg = kg
 
-    def search_vector_db(self, query_text):
+    def search_vector_db(self, query_text, distance_threshold=1.5):
         try:
             collection = self.client.get_collection(name=self.collection_name)
         except Exception:
             return "No documents found."
         
         query_embedding = self.embed_model.encode([query_text]).tolist()
-        results = collection.query(query_embeddings=query_embedding, n_results=15)
+        results = collection.query(
+            query_embeddings=query_embedding, 
+            n_results=5,
+            where={"source": {"$ne": "knowledge_graph"}}
+        )
         
         chunks = []
         if results.get('documents') and results['documents'][0]:
             docs = results['documents'][0]
             metas = results['metadatas'][0] if results.get('metadatas') and results['metadatas'][0] else [{}] * len(docs)
-            for doc, meta in zip(docs, metas):
-                source = meta.get('source', 'Unknown')
-                chunks.append(f"[Source: {source}]\n{doc}")
+            distances = results['distances'][0] if results.get('distances') and results['distances'][0] else [0] * len(docs)
+            
+            for doc, meta, distance in zip(docs, metas, distances):
+                if distance <= distance_threshold:
+                    source = meta.get('source', 'Unknown')
+                    chunks.append(f"[Source: {source}]\n{doc}")
                 
         return "\n\n".join(chunks) if chunks else "No documents found."
 
@@ -118,11 +125,11 @@ class DepartmentAgent:
             
             if action_match and input_match:
                 action = action_match.group(1).strip()
-                action_input = input_match.group(1).strip()
+                action_input = input_match.group(1).strip().strip('"').strip("'")
                 
                 observation = ""
                 if action == "search_vector_db":
-                    observation = self.search_vector_db(action_input)
+                    observation = self.search_vector_db(action_input, distance_threshold)
                 elif action == "search_knowledge_graph":
                     observation = self.search_knowledge_graph(action_input)
                 elif action == "search_exact_text":
