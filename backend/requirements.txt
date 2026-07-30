@@ -11,3 +11,5 @@ python-docx
 psutil
 langchain-text-splitters
 huggingface-hub
+bitsandbytes
+accelerate
