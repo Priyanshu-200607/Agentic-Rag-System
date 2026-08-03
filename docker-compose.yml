@@ -9,8 +9,11 @@ services:
       - TRANSFORMERS_OFFLINE=1
       - OLLAMA_HOST=http://ollama:11434
     command: uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+    pid: "host"
     volumes:
       - ./backend:/app
+      - /:/hostFS:ro
+      - ./logs:/app/logs
       # Preserve the container's embedded model even if it's missing on the host
       - /app/embedding_model
       - ./frontend:/frontend

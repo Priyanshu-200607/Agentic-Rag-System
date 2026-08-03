@@ -8,6 +8,8 @@ import chromadb
 from ollama import chat
 
 import config
+from logger import get_logger
+logger = get_logger()
 from resource_manager import ResourceManager
 from document_processor import process_file
 from department_agent import DepartmentAgent
@@ -16,6 +18,10 @@ from kg_system import KnowledgeGraph
 # Fix #3: Max concurrent KG extraction threads (prevents Ollama RAM saturation)
 _kg_semaphore = threading.Semaphore(1)
 
+# Background tasks tracking
+background_tasks = {}
+
+
 # Consistent collection naming — single source of truth for all files
 def get_collection_name(department_name: str) -> str:
     return f"dept_{department_name}"
@@ -23,7 +29,7 @@ def get_collection_name(department_name: str) -> str:
 class MultiDeptRAG:
     """Master Agent / Orchestrator for Multi-Department RAG"""
     def __init__(self, db_path=None, embed_model_name=None, llm_model_name=None):
-        print("Initializing Agentic Orchestrator System...")
+        logger.info("[SYSTEM] Initializing Agentic Orchestrator System...")
         
         self.db_path = db_path or config.CHROMA_DB_PATH
         self.embed_model_name = embed_model_name or config.EMBED_MODEL_NAME
@@ -33,7 +39,7 @@ class MultiDeptRAG:
         self.client = chromadb.PersistentClient(path=self.db_path)
         self.agents = {}
         self.kg = KnowledgeGraph()
-        print("Master Agent and Department Agents ready.")
+        logger.info("[SYSTEM] Master Agent and Department Agents ready.")
 
     def get_agent(self, department_name):
         return self.agents.setdefault(
@@ -76,7 +82,7 @@ class MultiDeptRAG:
                     metadatas=metadatas[i:i+batch_size]
                 )
 
-            print(f"Vectors stored. Scheduling KG extraction for {len(documents)} chunks...")
+            logger.info(f"[TASK] Vectors stored. Scheduling KG extraction for {len(documents)} chunks...")
 
             # Fix #3: Background thread with semaphore (max 1 concurrent KG job)
             # and rate-limiting sleep to prevent Ollama/CPU saturation.
@@ -86,17 +92,26 @@ class MultiDeptRAG:
             def run_kg_extraction(docs, dept):
                 # Process the chunks in massive parallel batches on the GPU
                 current_batch_size = ResourceManager.get_optimal_batch_sizes()["kg_batch"]
+                task_id = f"kg_{dept}_{uuid.uuid4().hex[:8]}"
+                background_tasks[task_id] = {"task": f"KG Extraction ({dept})", "progress": 0, "total": len(docs), "status": "running"}
+                
                 with _kg_semaphore:
-                    print(f"\n[BACKGROUND TASK] KG extraction started for {dept} ({len(docs)} chunks)...")
-                    print(f"-> Extracting knowledge graph facts in batches of {current_batch_size}...")
-                    
+                    logger.info(f"[TASK] KG extraction started for {dept} ({len(docs)} chunks)...")
                     i = 0
+                    pbar = tqdm(total=len(docs), desc=f"KG Extraction ({dept})", unit="chunk")
 
                     while i < len(docs):
                         current_batch_size = ResourceManager.check_memory_pressure(current_batch_size)
                         batch = docs[i:i + current_batch_size]
                         
-                        facts = self.kg.extract_from_texts(batch, dept)
+                        try:
+                            facts = self.kg.extract_from_texts(batch, dept)
+                        except Exception as e:
+                            logger.error(f"[SYSTEM] Aborting KG extraction due to critical error: {e}")
+                            background_tasks[task_id]["status"] = "error"
+                            background_tasks[task_id]["error"] = str(e)
+                            break
+
                         if facts:
                             embeddings = self.embed_model.encode(facts, show_progress_bar=False).tolist()
                             ids = [f"{dept}_kg_{i}_{j}" for j in range(len(facts))]
@@ -105,12 +120,14 @@ class MultiDeptRAG:
                                 col = self.client.get_collection(name=get_collection_name(dept))
                                 col.add(ids=ids, documents=facts, embeddings=embeddings, metadatas=metadatas)
                             except Exception as e:
-                                print(f"Failed to add KG facts to Chroma: {e}")
+                                logger.error(f"[SYSTEM] Failed to add KG facts to Chroma: {e}")
                                 
                         i += current_batch_size
-                        print(f"[BACKGROUND TASK] KG extraction progress: {min(i, len(docs))}/{len(docs)} chunks done")
+                        pbar.update(len(batch))
+                        background_tasks[task_id]["progress"] = min(i, len(docs))
 
                     
+                    pbar.close()
                     self.kg.invalidate_cache()
                     
                     # Unload REBEL from the GPU to free up VRAM for Ollama
@@ -118,7 +135,9 @@ class MultiDeptRAG:
                     if hasattr(kgs, 'unload_rebel'):
                         kgs.unload_rebel()
                         
-                    print(f"[BACKGROUND TASK] KG extraction complete for {dept}!\n")
+                    if background_tasks[task_id]["status"] != "error":
+                        background_tasks[task_id]["status"] = "completed"
+                    logger.info(f"[TASK] KG extraction complete for {dept}!")
 
             thread = threading.Thread(
                 target=run_kg_extraction,
@@ -141,9 +160,9 @@ class MultiDeptRAG:
         # 1. Drop the entire ChromaDB collection and recreate it empty
         try:
             self.client.delete_collection(name=collection_name)
-            print(f"Cleared ChromaDB collection: {collection_name}")
+            logger.info(f"[TASK] Cleared ChromaDB collection: {collection_name}")
         except Exception as e:
-            print(f"ChromaDB clear warning: {e}")
+            logger.warning(f"[SYSTEM] ChromaDB clear warning: {e}")
 
         # 2. Remove all KG edges for this department from SQLite and rebuild graph
         with self.kg._write_lock:
@@ -155,7 +174,7 @@ class MultiDeptRAG:
             self.kg.load()
         # Invalidate entity cache since graph data changed
         self.kg.invalidate_cache()
-        print(f"Cleared KG edges for department: {department_name}")
+        logger.info(f"[TASK] Cleared KG edges for department: {department_name}")
 
         # 3. Remove the lazy-loaded agent so it is recreated fresh on next query
         if department_name in self.agents:
@@ -213,23 +232,28 @@ class MultiDeptRAG:
                 data = json.loads(match.group(0))
                 score = int(data.get("score", 10))
                 feedback = data.get("feedback", "")
+                logger.info(f"[QUERY] Evaluator gave score {score}/10")
                 return {"score": score, "feedback": feedback}
         except Exception as e:
-            print(f"Evaluation Error: {e}")
+            logger.error(f"[SYSTEM] Evaluation Error: {e}")
         # Default to pass if evaluator fails to avoid breaking
         return {"score": 10, "feedback": ""}
 
     def process_request(self, query, username):
+        logger.info(f"[QUERY] User {username} asked: {query}")
         from auth import load_db
         db = load_db()
         users = db.get("users", {})
         if username not in users:
-            return "User not found."
+            yield json.dumps({"type": "answer", "message": "User not found."}) + "\n"
+            return
 
         allowed_departments = users[username].get("allowed_departments", [])
         if not allowed_departments:
-            return "You do not have access to any departments."
+            yield json.dumps({"type": "answer", "message": "You do not have access to any departments."}) + "\n"
+            return
 
+        yield json.dumps({"type": "status", "message": "Routing query..."}) + "\n"
         target_departments = self.route_query(query, allowed_departments)
         
         active_target_departments = [
@@ -238,12 +262,14 @@ class MultiDeptRAG:
         ]
 
         if not active_target_departments:
-            return "Query blocked: The requested departments are currently suspended or offline."
+            yield json.dumps({"type": "answer", "message": "Query blocked: The requested departments are currently suspended or offline."}) + "\n"
+            return
 
         successful_responses = {}
         failed_departments = []
         
         for dept in active_target_departments:
+            yield json.dumps({"type": "status", "message": f"Querying department agent: {dept.upper()}..."}) + "\n"
             agent = self.get_agent(dept)
             current_query = query
             best_resp = ""
@@ -256,9 +282,11 @@ class MultiDeptRAG:
                     if attempt == 1:
                         break # Failed on last attempt
                     # Give it a generic push if it failed completely
+                    yield json.dumps({"type": "status", "message": f"{dept.upper()} agent failed. Retrying..."}) + "\n"
                     current_query = f"Original Query: {query}\nFeedback: Your previous search yielded no results. Try searching for different keywords or exact entity names."
                     continue
                 
+                yield json.dumps({"type": "status", "message": f"Evaluating {dept.upper()} response..."}) + "\n"
                 evaluation = self.evaluate_response(query, resp)
                 best_resp = resp
                 
@@ -266,6 +294,7 @@ class MultiDeptRAG:
                     success = True
                     break
                 else:
+                    yield json.dumps({"type": "status", "message": f"Refining {dept.upper()} response (Score: {evaluation['score']}/10)..."}) + "\n"
                     current_query = f"Original Query: {query}\nFeedback on previous answer: {evaluation['feedback']}\nPlease use your tools to search again focusing on the feedback."
             
             # Add to successful responses if we have a valid answer
@@ -276,11 +305,13 @@ class MultiDeptRAG:
 
         if not successful_responses:
             if failed_departments:
-                return f"I could not find a relevant answer in the following departments: {', '.join(failed_departments)}."
-            return "Based on the available data, I could not find an answer to your question."
+                yield json.dumps({"type": "answer", "message": f"I could not find a relevant answer in the following departments: {', '.join(failed_departments)}."}) + "\n"
+            else:
+                yield json.dumps({"type": "answer", "message": "Based on the available data, I could not find an answer to your question."}) + "\n"
+            return
             
         final_answer = ""
         for dept, resp in successful_responses.items():
             final_answer += f"[{dept.upper()}] {resp}\n\n"
             
-        return final_answer.strip()
+        yield json.dumps({"type": "answer", "message": final_answer.strip()}) + "\n"

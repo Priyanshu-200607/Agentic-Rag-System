@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
 
 # Install python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip && pip install --default-timeout=1000 --retries=10 -r requirements.txt
 
 # Pre-download models to cache them in the Docker image
 COPY download_models.py .

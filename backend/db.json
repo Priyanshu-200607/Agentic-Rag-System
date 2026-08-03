@@ -102,5 +102,12 @@
         "marketing": {
             "status": "active"
         }
+    },
+    "config": {
+        "llm": {
+            "master_agent": "llama3",
+            "department_agent": "llama3",
+            "temperature": 0.0
+        }
     }
 }

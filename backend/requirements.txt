@@ -13,3 +13,4 @@ langchain-text-splitters
 huggingface-hub
 bitsandbytes
 accelerate
+GPUtil

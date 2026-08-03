@@ -12,8 +12,20 @@ import config
 import re
 import uuid
 import threading
+import psutil
+from fastapi.responses import StreamingResponse
+from logger import get_logger
+
+logger = get_logger()
+
+# GPU tracking import
+try:
+    import GPUtil
+except ImportError:
+    GPUtil = None
 
 history_lock = threading.Lock()
+chat_sessions_lock = threading.Lock()
 
 app = FastAPI()
 
@@ -46,11 +58,81 @@ def login(req: Login):
 
 @app.post("/chat")
 def chat(req: Question):
-    answer = system.process_request(
-        req.question,
-        username=req.username
-    )
-    return {"answer": answer}
+    session_id = req.session_id or uuid.uuid4().hex
+    
+    def generate():
+        final_answer = "Error generating response."
+        for chunk in system.process_request(req.question, username=req.username):
+            yield chunk
+            # Extract final answer if it's the answer type
+            try:
+                data = json.loads(chunk)
+                if data.get("type") == "answer":
+                    final_answer = data.get("message")
+            except Exception:
+                pass
+        
+        # Save to session history after generation
+        with chat_sessions_lock:
+            sessions_data = load_chat_sessions()
+            user_sessions = sessions_data.setdefault(req.username, {})
+            session = user_sessions.setdefault(session_id, [])
+            
+            import datetime
+            timestamp = datetime.datetime.now().isoformat()
+            
+            session.append({"sender": "You", "text": req.question, "timestamp": timestamp})
+            session.append({"sender": "Assistant", "text": final_answer, "timestamp": timestamp})
+            save_chat_sessions(sessions_data)
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson", headers={"X-Session-ID": session_id})
+
+def load_chat_sessions():
+    path = os.path.join(config.BASE_DIR, "chat_sessions.json")
+    if os.path.exists(path):
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_chat_sessions(sessions):
+    path = os.path.join(config.BASE_DIR, "chat_sessions.json")
+    tmp_path = f"{path}.{uuid.uuid4().hex}.tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(sessions, f)
+    os.replace(tmp_path, path)
+
+@app.get("/chat/sessions")
+def get_chat_sessions(username: str):
+    db = load_db()
+    if username not in db.get("users", {}):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    with chat_sessions_lock:
+        sessions_data = load_chat_sessions()
+        user_sessions = sessions_data.get(username, {})
+        # Return sorted list of sessions (e.g. by last message time, but for now just IDs and lengths)
+        return [{"id": sid, "messages_count": len(msgs)} for sid, msgs in user_sessions.items()]
+
+@app.get("/chat/session/{session_id}")
+def get_chat_session(session_id: str, username: str):
+    db = load_db()
+    if username not in db.get("users", {}):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    with chat_sessions_lock:
+        sessions_data = load_chat_sessions()
+        user_sessions = sessions_data.get(username, {})
+        return user_sessions.get(session_id, [])
+
+@app.post("/chat/session")
+def create_chat_session(username: str):
+    db = load_db()
+    if username not in db.get("users", {}):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return {"session_id": uuid.uuid4().hex}
 
 def load_history():
     if os.path.exists(config.HISTORY_FILE_PATH):
@@ -111,7 +193,11 @@ async def upload(
 
         save_history(history)
 
-    system.admin_upload_to_department(department, saved_paths)
+    try:
+        system.admin_upload_to_department(department, saved_paths)
+    except Exception as e:
+        logger.error(f"[SYSTEM] Ingestion failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     return {"status": "success"}
 
 @app.get("/history")
@@ -152,6 +238,7 @@ def delete_file(department: str, filename: str, x_username: Optional[str] = Head
 def clear_department_docs(department: str, x_username: Optional[str] = Header(None)):
     """Wipe ALL documents and KG facts for an entire department in one shot."""
     _require_admin(x_username)
+    logger.info(f"[TASK] Clearing department data: {department}")
 
     system.admin_clear_department(department)
 
@@ -238,18 +325,24 @@ def update_user_access(username: str, req: AccessUpdate, x_username: Optional[st
 @app.get("/admin/departments")
 def get_departments(x_username: Optional[str] = Header(None)):
     _require_admin(x_username)
-    return load_db()["departments"]
+    try:
+        return load_db()["departments"]
+    except Exception as e:
+        logger.error(f"[SYSTEM] Department fetch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/admin/departments/{name}")
 def create_department(name: str, x_username: Optional[str] = Header(None)):
     _require_admin(x_username)
+    db = load_db()
+    if name in db.get("departments", {}):
+        raise HTTPException(status_code=400, detail="Department already exists")
     if not re.match(r"^[a-zA-Z0-9_-]{2,60}$", name):
         raise HTTPException(status_code=400, detail="Invalid department name. Must be 2-60 alphanumeric characters.")
     
-    db = load_db()
-    if name not in db["departments"]:
-        db["departments"][name] = {"status": "active"}
-        save_db(db)
+    db.setdefault("departments", {})[name] = {"status": "active"}
+    save_db(db)
+    logger.info(f"[SYSTEM] Admin {x_username} created department {name}")
     return {"status": "success"}
 
 @app.put("/admin/departments/{name}/suspend")
@@ -262,6 +355,151 @@ def toggle_suspend_department(name: str, x_username: Optional[str] = Header(None
         save_db(db)
     return {"status": "success"}
 
+def get_dir_size(path):
+    total_size = 0
+    if os.path.exists(path):
+        for dirpath, _, filenames in os.walk(path):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                if not os.path.islink(fp):
+                    total_size += os.path.getsize(fp)
+    return total_size
+
+@app.get("/admin/system/status")
+def get_system_status(x_username: Optional[str] = Header(None)):
+    _require_admin(x_username)
+    
+    # CPU & RAM
+    cpu = psutil.cpu_percent(interval=0.1)
+    mem = psutil.virtual_memory()
+    
+    # GPU
+    gpu_stats = []
+    if GPUtil:
+        try:
+            gpus = GPUtil.getGPUs()
+            for g in gpus:
+                gpu_stats.append({
+                    "id": g.id,
+                    "name": g.name,
+                    "load": g.load * 100,
+                    "memoryUtil": g.memoryUtil * 100,
+                    "memoryTotal": g.memoryTotal,
+                    "memoryUsed": g.memoryUsed
+                })
+        except Exception:
+            pass
+            
+    # Storage
+    vector_db_size = get_dir_size(config.CHROMA_DB_PATH)
+    upload_size = get_dir_size(config.UPLOAD_DIR)
+    kg_db_size = os.path.getsize(config.KG_DB_PATH) if os.path.exists(config.KG_DB_PATH) else 0
+
+    from rag_system import background_tasks
+    
+    return {
+        "hardware": {
+            "cpu": cpu,
+            "ram_percent": mem.percent,
+            "ram_used_gb": mem.used / (1024**3),
+            "ram_total_gb": mem.total / (1024**3),
+            "gpus": gpu_stats
+        },
+        "storage": {
+            "vector_db_mb": vector_db_size / (1024**2),
+            "uploads_mb": upload_size / (1024**2),
+            "kg_db_mb": kg_db_size / (1024**2)
+        },
+        "background_tasks": background_tasks
+    }
+
+@app.post("/admin/system/cache/clear")
+def clear_cache(x_username: Optional[str] = Header(None)):
+    _require_admin(x_username)
+    system.kg.invalidate_cache()
+    # Force gc and torch clear
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
+    return {"status": "success", "message": "Cache cleared"}
+
+@app.get("/admin/llm/available")
+def get_llm_available(x_username: Optional[str] = Header(None)):
+    _require_admin(x_username)
+    try:
+        import ollama
+        models = ollama.list()
+        return {"models": [m["name"] for m in models.get("models", [])]}
+    except Exception as e:
+        return {"models": [config.LLM_MODEL_NAME], "error": str(e)}
+
+@app.get("/admin/llm/config")
+def get_llm_config(x_username: Optional[str] = Header(None)):
+    _require_admin(x_username)
+    db = load_db()
+    llm_conf = db.get("config", {}).get("llm", {
+        "master_agent": config.LLM_MODEL_NAME,
+        "department_agent": config.LLM_MODEL_NAME,
+        "temperature": 0.0
+    })
+    return llm_conf
+
+from pydantic import BaseModel
+class LLMConfigUpdate(BaseModel):
+    master_agent: str
+    department_agent: str
+    temperature: float
+
+@app.post("/admin/llm/config")
+def update_llm_config(req: LLMConfigUpdate, x_username: Optional[str] = Header(None)):
+    _require_admin(x_username)
+    db = load_db()
+    
+    if "config" not in db:
+        db["config"] = {}
+        
+    db["config"]["llm"] = {
+        "master_agent": req.master_agent,
+        "department_agent": req.department_agent,
+        "temperature": req.temperature
+    }
+    save_db(db)
+    
+    # Update active system
+    system.llm_model_name = req.master_agent
+    for agent in system.agents.values():
+        agent.llm_model_name = req.department_agent
+        # Note: Temperature is passed per-request in Chat, need to apply there if dynamically requested
+        
+@app.get("/admin/logs")
+def get_admin_logs(type: str = "all", lines: int = 200, x_username: Optional[str] = Header(None)):
+    _require_admin(x_username)
+    log_path = os.path.join(config.BASE_DIR, "logs", "system.log")
+    if not os.path.exists(log_path):
+        return {"logs": []}
+        
+    filtered_logs = []
+    try:
+        with open(log_path, "r") as f:
+            all_lines = f.readlines()
+            for line in all_lines:
+                if type == "query" and "[QUERY]" in line:
+                    filtered_logs.append(line.strip())
+                elif type == "task" and "[TASK]" in line:
+                    filtered_logs.append(line.strip())
+                elif type == "system" and "[SYSTEM]" in line:
+                    filtered_logs.append(line.strip())
+                elif type == "all":
+                    filtered_logs.append(line.strip())
+        return {"logs": filtered_logs[-lines:]}
+    except Exception as e:
+        logger.error(f"[SYSTEM] Error reading logs: {e}")
+        return {"logs": [], "error": str(e)}
 
 # SPA Catch-all routing for React Router
 app.mount("/assets", StaticFiles(directory=os.path.join(frontend_path, "assets")), name="assets")

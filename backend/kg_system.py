@@ -8,6 +8,8 @@ from collections import defaultdict
 from ollama import chat
 
 import config
+from logger import get_logger
+logger = get_logger()
 
 KG_DB_FILE = config.KG_DB_PATH
 
@@ -36,17 +38,19 @@ def get_rebel():
     if _rebel_model is None:
         from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
         import torch
-        print("\nLoading REBEL model for Knowledge Graph extraction (this may take a moment)...")
+        logger.info("\nLoading REBEL model for Knowledge Graph extraction (this may take a moment)...")
         device = ResourceManager.get_device()
         quantize = ResourceManager.should_quantize_8bit()
         
         _rebel_tokenizer = AutoTokenizer.from_pretrained(config.KG_MODEL_NAME)
         
         if quantize:
-            print(f"Loading REBEL in 8-bit mode to save VRAM...")
+            logger.info(f"[SYSTEM] Loading REBEL in 8-bit mode to save VRAM...")
+            from transformers import BitsAndBytesConfig
+            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
             _rebel_model = AutoModelForSeq2SeqLM.from_pretrained(
                 config.KG_MODEL_NAME, 
-                load_in_8bit=True,
+                quantization_config=quantization_config,
                 device_map="auto"
             )
         else:
@@ -257,13 +261,14 @@ class KnowledgeGraph:
             decoded_texts = tokenizer.batch_decode(generated_tokens, skip_special_tokens=False)
             
             # Parse the text into clean dictionaries and store
-            for decoded_text in tqdm(decoded_texts, desc="Parsing REBEL Triples"):
+            for decoded_text in tqdm(decoded_texts, desc="Parsing REBEL Triples", leave=False):
                 relations = parse_rebel_output(decoded_text)
                 for rel in relations:
                     fact = self.add_relationship(rel['head'], rel['type'], rel['tail'], department_name)
                     if fact: extracted_facts.append(fact)
         except Exception as e:
-            print(f"KG Extraction Error (REBEL Batch): {e}")
+            # Raise the exception so the master agent knows to abort the loop
+            raise RuntimeError(f"REBEL extraction failed: {e}") from e
             
         return extracted_facts
 
