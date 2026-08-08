@@ -31,6 +31,7 @@ Everything — embeddings, LLM inference, vector storage, and graph storage — 
 - 🕸️ **Hybrid Retrieval (Vector + Graph)** — Combines ChromaDB semantic search with a NetworkX/SQLite knowledge graph for precise, multi-hop, entity-level facts that plain vector search misses.
 - 🛠️ **ReAct Tool-Use Agents** — Department agents autonomously choose between `search_vector_db`, `search_knowledge_graph`, and `search_exact_text` tools to answer a query — no brittle, hallucination-prone Text-to-SQL required.
 - ⚙️ **Hardware-Aware Adaptive Extraction** — A built-in Resource Manager detects available VRAM and automatically switches between fast REBEL-based graph extraction (consumer GPUs) and high-quality LLM-based extraction (enterprise GPUs).
+- 📊 **Real-Time System Monitoring** — An integrated System Status dashboard provides live hardware telemetry (CPU, RAM, GPU), vector database sizing, and cache controls right from the admin UI.
 - 🔒 **Fully Local & Private** — Runs entirely on `ollama` + `ChromaDB` + `SQLite`. No data ever leaves your infrastructure.
 - 🧩 **Modular, Centralized Codebase** — Clean separation of concerns (`rag_system.py`, `department_agent.py`, `resource_manager.py`) with all settings centralized in `config.py`.
 
@@ -182,8 +183,10 @@ npm run dev
 
 1. Open the Chat/Admin UI in your browser (at `http://localhost:8000` via Docker, or the Vite URL like `http://localhost:5173` via manual run).
 2. Log in as `admin` (password: `123`) to unlock upload permissions.
-3. Upload `.txt`, `.pdf`, or `.docx` files to a specific department (HR, Finance, IT) via the sidebar.
-4. Log out and log back in as a different role (e.g., `intern`, `hr_guy`) to see RBAC and intelligent routing in action.
+3. Explore the **Admin Dashboard** to manage users, roles, and department access permissions.
+4. Visit the **System Status** dashboard to monitor real-time RAM, GPU usage, and vector DB stats.
+5. Upload `.txt`, `.pdf`, or `.docx` files to a specific department (HR, Finance, IT) via the sidebar.
+6. Log out and log back in as a different role (e.g., `intern`, `hr_guy`) to see RBAC and intelligent routing in action.
 
 ---
 
