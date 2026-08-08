@@ -113,8 +113,27 @@ def get_chat_sessions(username: str):
     with chat_sessions_lock:
         sessions_data = load_chat_sessions()
         user_sessions = sessions_data.get(username, {})
-        # Return sorted list of sessions (e.g. by last message time, but for now just IDs and lengths)
-        return [{"id": sid, "messages_count": len(msgs)} for sid, msgs in user_sessions.items()]
+        sessions_list = []
+        for sid, msgs in user_sessions.items():
+            last_timestamp = msgs[-1]["timestamp"] if msgs and "timestamp" in msgs[-1] else ""
+            title = msgs[0]["text"][:25] + "..." if msgs else "New Chat"
+            sessions_list.append({"id": sid, "messages_count": len(msgs), "timestamp": last_timestamp, "title": title})
+        
+        sessions_list.sort(key=lambda x: x["timestamp"], reverse=True)
+        return sessions_list
+
+@app.delete("/chat/session/{session_id}")
+def delete_chat_session(session_id: str, username: str):
+    db = load_db()
+    if username not in db.get("users", {}):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    with chat_sessions_lock:
+        sessions_data = load_chat_sessions()
+        if username in sessions_data and session_id in sessions_data[username]:
+            del sessions_data[username][session_id]
+            save_chat_sessions(sessions_data)
+        return {"status": "success"}
 
 @app.get("/chat/session/{session_id}")
 def get_chat_session(session_id: str, username: str):
@@ -232,6 +251,12 @@ def delete_file(department: str, filename: str, x_username: Optional[str] = Head
         if not (item["filename"] == safe_filename and item["department"] == department)
     ]
     save_history(history)
+    
+    # If no files remain for this department, clear all remaining vectors (e.g. KG facts) and graph edges
+    remaining_in_dept = [item for item in history if item["department"] == department]
+    if not remaining_in_dept:
+        system.admin_clear_department(department)
+        
     return {"status": "success"}
 
 @app.delete("/upload/{department}")
@@ -408,7 +433,8 @@ def get_system_status(x_username: Optional[str] = Header(None)):
         "storage": {
             "vector_db_mb": vector_db_size / (1024**2),
             "uploads_mb": upload_size / (1024**2),
-            "kg_db_mb": kg_db_size / (1024**2)
+            "kg_db_mb": kg_db_size / (1024**2),
+            "cache_items": system.kg.get_cache_size()
         },
         "background_tasks": background_tasks
     }

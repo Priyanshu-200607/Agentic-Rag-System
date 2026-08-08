@@ -88,8 +88,9 @@ class MultiDeptRAG:
             # and rate-limiting sleep to prevent Ollama/CPU saturation.
             # We pass a COPY of documents to avoid holding the upload request's memory.
             docs_copy = list(documents)
+            metadatas_copy = list(metadatas)
 
-            def run_kg_extraction(docs, dept):
+            def run_kg_extraction(docs, metas, dept):
                 # Process the chunks in massive parallel batches on the GPU
                 current_batch_size = ResourceManager.get_optimal_batch_sizes()["kg_batch"]
                 task_id = f"kg_{dept}_{uuid.uuid4().hex[:8]}"
@@ -103,19 +104,22 @@ class MultiDeptRAG:
                     while i < len(docs):
                         current_batch_size = ResourceManager.check_memory_pressure(current_batch_size)
                         batch = docs[i:i + current_batch_size]
+                        meta_batch = metas[i:i + current_batch_size]
+                        source_files = [m["source"] for m in meta_batch]
                         
                         try:
-                            facts = self.kg.extract_from_texts(batch, dept)
+                            facts_data = self.kg.extract_from_texts(batch, dept, source_files)
                         except Exception as e:
                             logger.error(f"[SYSTEM] Aborting KG extraction due to critical error: {e}")
                             background_tasks[task_id]["status"] = "error"
                             background_tasks[task_id]["error"] = str(e)
                             break
 
-                        if facts:
+                        if facts_data:
+                            facts = [fd["fact"] for fd in facts_data]
                             embeddings = self.embed_model.encode(facts, show_progress_bar=False).tolist()
                             ids = [f"{dept}_kg_{i}_{j}" for j in range(len(facts))]
-                            metadatas = [{"source": "knowledge_graph", "department": dept, "type": "kg_fact"} for _ in range(len(facts))]
+                            metadatas = [{"source": fd.get("source_file") or "knowledge_graph", "department": dept, "type": "kg_fact"} for fd in facts_data]
                             try:
                                 col = self.client.get_collection(name=get_collection_name(dept))
                                 col.add(ids=ids, documents=facts, embeddings=embeddings, metadatas=metadatas)
@@ -141,7 +145,7 @@ class MultiDeptRAG:
 
             thread = threading.Thread(
                 target=run_kg_extraction,
-                args=(docs_copy, department_name),
+                args=(docs_copy, metadatas_copy, department_name),
                 daemon=True
             )
             thread.start()

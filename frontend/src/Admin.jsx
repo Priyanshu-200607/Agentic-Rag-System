@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from "react";
 import Layout from "./Layout";
-import SystemStatus from "./SystemStatus";
-import LogViewer from "./LogViewer";
 
 function Admin() {
   const [departments, setDepartments] = useState({});
@@ -163,9 +161,9 @@ function Admin() {
 
   return (
     <Layout activeTab="admin">
-      <div className="max-w-screen-2xl mx-auto grid grid-cols-1 xl:grid-cols-4 gap-6 h-[calc(100vh-140px)]">
-        {/* Dashboard Container (Left 3 cols) */}
-        <div className="xl:col-span-3 bg-white rounded-xl shadow-sm border border-outline-variant/30 overflow-y-auto h-full">
+      <div className="max-w-screen-2xl mx-auto h-[calc(100vh-140px)]">
+        {/* Dashboard Container */}
+        <div className="w-full bg-white rounded-xl shadow-sm border border-outline-variant/30 overflow-y-auto h-full">
           {/* Header */}
           <div className="p-6 border-b border-outline-variant/20 flex items-center gap-3">
             <span className="material-symbols-outlined text-primary text-3xl">
@@ -380,16 +378,6 @@ function Admin() {
               </table>
             </div>
           </div>
-
-          <hr className="border-outline-variant/20 mx-6" />
-
-          {/* Section: Unified Log Viewer */}
-          <LogViewer />
-        </div>
-
-        {/* System Status Container (Right 1 col) */}
-        <div className="xl:col-span-1 hidden xl:block h-full">
-          <SystemStatus />
         </div>
       </div>
     </Layout>

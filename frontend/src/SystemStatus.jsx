@@ -73,18 +73,18 @@ function SystemStatus() {
   if (!status) return <div className="p-6 text-center text-on-surface-variant">Loading System Status...</div>;
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-outline-variant/30 overflow-hidden h-full flex flex-col">
-      <div className="p-4 border-b border-outline-variant/20 bg-surface-container-lowest">
-        <h2 className="font-headline-md text-lg text-on-surface flex items-center gap-2">
+    <div className="w-full">
+      <div className="mb-4">
+        <h2 className="font-headline-md text-xl text-on-surface flex items-center gap-2">
           <span className="material-symbols-outlined text-primary">monitoring</span>
           System Status
         </h2>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 items-start">
         
         {/* Hardware Card */}
-        <div className="bg-surface-container-lowest border border-outline-variant/20 rounded-lg p-4">
+        <div className="bg-white shadow-sm border border-outline-variant/30 rounded-xl p-4 flex flex-col h-full">
           <h3 className="text-sm font-bold text-on-surface-variant uppercase tracking-wider mb-3">Hardware</h3>
           <div className="space-y-3 text-sm">
             <div>
@@ -123,7 +123,7 @@ function SystemStatus() {
         </div>
 
         {/* Background Tasks */}
-        <div className="bg-surface-container-lowest border border-outline-variant/20 rounded-lg p-4">
+        <div className="bg-white shadow-sm border border-outline-variant/30 rounded-xl p-4 flex flex-col h-full">
           <h3 className="text-sm font-bold text-on-surface-variant uppercase tracking-wider mb-3">Background Tasks</h3>
           <div className="space-y-3 text-sm">
             {Object.keys(status.background_tasks || {}).length === 0 ? (
@@ -149,8 +149,19 @@ function SystemStatus() {
           </div>
         </div>
 
+        {/* Entity Cache Card */}
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-outline-variant/30 flex flex-col justify-between h-full">
+          <span className="text-on-surface-variant font-medium flex items-center gap-2 mb-4">
+            <span className="material-symbols-outlined text-tertiary">memory</span>
+            Entity Cache Items
+          </span>
+          <span className="text-3xl font-bold font-mono text-tertiary">
+            {status.storage?.cache_items ?? 0}
+          </span>
+        </div>
+
         {/* Storage */}
-        <div className="bg-surface-container-lowest border border-outline-variant/20 rounded-lg p-4">
+        <div className="bg-white shadow-sm border border-outline-variant/30 rounded-xl p-4 flex flex-col h-full">
           <h3 className="text-sm font-bold text-on-surface-variant uppercase tracking-wider mb-3">Storage & Cache</h3>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
@@ -175,7 +186,7 @@ function SystemStatus() {
         </div>
 
         {/* LLM Config */}
-        <div className="bg-surface-container-lowest border border-outline-variant/20 rounded-lg p-4">
+        <div className="bg-white shadow-sm border border-outline-variant/30 rounded-xl p-4 flex flex-col h-full">
           <h3 className="text-sm font-bold text-on-surface-variant uppercase tracking-wider mb-3">LLM Configuration</h3>
           <div className="space-y-4 text-sm">
             <div>

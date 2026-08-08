@@ -3,6 +3,7 @@ import Login from './Login';
 import Chat from './Chat';
 import Admin from './Admin';
 import Help from './Help';
+import System from './System';
 
 function App() {
   return (
@@ -11,6 +12,7 @@ function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/chat" element={<Chat />} />
       <Route path="/admin" element={<Admin />} />
+      <Route path="/system" element={<System />} />
       <Route path="/help" element={<Help />} />
     </Routes>
   );

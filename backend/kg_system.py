@@ -157,9 +157,12 @@ class KnowledgeGraph:
 
     def invalidate_cache(self):
         """Fix #6: Clear the module-level entity cache after new data is ingested."""
-        global _entity_cache
         with _entity_cache_lock:
             _entity_cache.clear()
+
+    def get_cache_size(self):
+        with _entity_cache_lock:
+            return len(_entity_cache)
 
     def add_relationship(self, source, relation, target, department="global"):
         source = self.canonicalize(source)
@@ -185,7 +188,7 @@ class KnowledgeGraph:
             return f"{source} | {relation} | {target}"
         return None
 
-    def extract_from_texts(self, texts, department_name="global"):
+    def extract_from_texts(self, texts, department_name="global", source_files=None):
         if not texts:
             return []
             
@@ -204,16 +207,17 @@ class KnowledgeGraph:
         # Or if we are on a Mac (mps) because REBEL is extremely slow on Apple Silicon
         if config.ADAPTIVE_KG_EXTRACTION and (vram_gb >= 20 or device == "mps"):
             print("[BACKGROUND TASK] Using LLM (llama3) for High-Quality KG Extraction...")
-            extracted_facts = self._extract_with_llm(texts, department_name)
+            extracted_facts = self._extract_with_llm(texts, department_name, source_files)
         else:
             print(f"[BACKGROUND TASK] Detected {vram_gb:.1f}GB VRAM. Using REBEL for Fast KG Extraction...")
-            extracted_facts = self._extract_with_rebel(texts, department_name)
+            extracted_facts = self._extract_with_rebel(texts, department_name, source_files)
             
         return extracted_facts
         
-    def _extract_with_llm(self, texts, department_name="global"):
+    def _extract_with_llm(self, texts, department_name="global", source_files=None):
         extracted_facts = []
-        for text in tqdm(texts, desc="Extracting KG Facts (LLM)"):
+        for i, text in enumerate(tqdm(texts, desc="Extracting KG Facts (LLM)")):
+            src_file = source_files[i] if source_files else None
             prompt = f"""
             Extract knowledge graph triples from the following text.
             Format exactly as:
@@ -231,12 +235,12 @@ class KnowledgeGraph:
                     parts = [p.strip() for p in line.split('|')]
                     if len(parts) == 3:
                         fact = self.add_relationship(parts[0], parts[1], parts[2], department_name)
-                        if fact: extracted_facts.append(fact)
+                        if fact: extracted_facts.append({"fact": fact, "source_file": src_file})
             except Exception as e:
                 print(f"KG Extraction Error (LLM): {e}")
         return extracted_facts
 
-    def _extract_with_rebel(self, texts, department_name="global"):
+    def _extract_with_rebel(self, texts, department_name="global", source_files=None):
         extracted_facts = []
         try:
             tokenizer, model = get_rebel()
@@ -261,11 +265,12 @@ class KnowledgeGraph:
             decoded_texts = tokenizer.batch_decode(generated_tokens, skip_special_tokens=False)
             
             # Parse the text into clean dictionaries and store
-            for decoded_text in tqdm(decoded_texts, desc="Parsing REBEL Triples", leave=False):
+            for i, decoded_text in enumerate(tqdm(decoded_texts, desc="Parsing REBEL Triples", leave=False)):
+                src_file = source_files[i] if source_files else None
                 relations = parse_rebel_output(decoded_text)
                 for rel in relations:
                     fact = self.add_relationship(rel['head'], rel['type'], rel['tail'], department_name)
-                    if fact: extracted_facts.append(fact)
+                    if fact: extracted_facts.append({"fact": fact, "source_file": src_file})
         except Exception as e:
             # Raise the exception so the master agent knows to abort the loop
             raise RuntimeError(f"REBEL extraction failed: {e}") from e

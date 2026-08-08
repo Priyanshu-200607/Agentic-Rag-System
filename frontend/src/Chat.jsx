@@ -13,7 +13,29 @@ function Chat() {
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
-    loadSessions();
+    const init = async () => {
+      try {
+        const res = await fetch(`http://127.0.0.1:8000/chat/sessions?username=${username}`);
+        const data = await res.json();
+        setSessions(data);
+        
+        const savedSession = localStorage.getItem('activeSessionId');
+        if (savedSession) {
+          if (data.find(s => s.id === savedSession)) {
+            loadSessionMessages(savedSession);
+          } else {
+            setActiveSessionId(savedSession);
+            setMessages([]);
+          }
+        } else {
+          startNewChat();
+        }
+      } catch (e) {
+        console.error(e);
+        startNewChat();
+      }
+    };
+    init();
   }, []);
 
   useEffect(() => {
@@ -25,16 +47,8 @@ function Chat() {
       const res = await fetch(`http://127.0.0.1:8000/chat/sessions?username=${username}`);
       const data = await res.json();
       setSessions(data);
-      
-      const savedSession = localStorage.getItem('activeSessionId');
-      if (savedSession && data.find(s => s.id === savedSession)) {
-        loadSessionMessages(savedSession);
-      } else {
-        startNewChat();
-      }
     } catch (e) {
       console.error(e);
-      startNewChat();
     }
   };
 
@@ -57,7 +71,21 @@ function Chat() {
       setActiveSessionId(data.session_id);
       localStorage.setItem('activeSessionId', data.session_id);
       setMessages([]);
-      loadSessions();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const deleteSession = async (e, sid) => {
+    e.stopPropagation();
+    if (!window.confirm("Are you sure you want to delete this chat session?")) return;
+    try {
+      await fetch(`http://127.0.0.1:8000/chat/session/${sid}?username=${username}`, { method: 'DELETE' });
+      if (activeSessionId === sid) {
+        startNewChat();
+      } else {
+        loadSessions();
+      }
     } catch (e) {
       console.error(e);
     }
@@ -109,8 +137,8 @@ function Chat() {
       
       setMessages([...newMessages, { sender: 'Assistant', text: finalAnswer }]);
       
-      // Update session list in case it's a new session getting its first message
-      if (newMessages.length === 1) loadSessions();
+      // Update session list to show new chat title
+      loadSessions();
 
     } catch (e) {
       setMessages([...newMessages, { sender: 'System', text: 'Error: Failed to process request.' }]);
@@ -136,16 +164,34 @@ function Chat() {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
-            {sessions.map(s => (
-              <button 
-                key={s.id}
-                onClick={() => loadSessionMessages(s.id)}
-                className={`w-full text-left px-4 py-3 rounded-lg text-sm truncate flex flex-col ${activeSessionId === s.id ? 'bg-primary-container text-on-primary-container font-bold' : 'hover:bg-surface-container-low text-on-surface'}`}
-              >
-                <span>Session {s.id.slice(0, 6)}</span>
-                <span className="text-xs opacity-70">{s.messages_count} messages</span>
-              </button>
-            ))}
+            {sessions.map(s => {
+              let dateStr = "";
+              if (s.timestamp) {
+                const d = new Date(s.timestamp);
+                dateStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              }
+              return (
+                <div key={s.id} className="relative group flex flex-col">
+                  <button 
+                    onClick={() => loadSessionMessages(s.id)}
+                    className={`w-full text-left px-4 py-3 rounded-lg text-sm truncate flex flex-col ${activeSessionId === s.id ? 'bg-primary-container text-on-primary-container font-bold' : 'hover:bg-surface-container-low text-on-surface'}`}
+                  >
+                    <span className="truncate">{s.title || `Session ${s.id.slice(0, 6)}`}</span>
+                    <span className="text-xs opacity-70 flex justify-between mt-1">
+                      <span>{s.messages_count} messages</span>
+                      <span>{dateStr}</span>
+                    </span>
+                  </button>
+                  <button 
+                    onClick={(e) => deleteSession(e, s.id)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md bg-error text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-700 shadow-sm"
+                    title="Delete Chat"
+                  >
+                    <span className="material-symbols-outlined text-[16px] leading-none">delete</span>
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
 

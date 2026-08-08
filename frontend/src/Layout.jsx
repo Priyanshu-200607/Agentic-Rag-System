@@ -199,6 +199,24 @@ const Layout = ({ children, activeTab }) => {
           )}
 
           {role === "admin" && (
+            <Link
+              to="/system"
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-highest transition-colors font-body-md ${activeTab === "system" ? "text-primary font-bold border-r-2 border-primary bg-primary-fixed/30" : ""}`}
+            >
+              <span
+                className="material-symbols-outlined"
+                style={{
+                  fontVariationSettings:
+                    activeTab === "system" ? "'FILL' 1" : "",
+                }}
+              >
+                memory
+              </span>
+              System Status
+            </Link>
+          )}
+
+          {role === "admin" && (
             <div className="mt-8 px-2">
               <div className="text-on-surface-variant font-label-md text-xs uppercase tracking-wider mb-2">
                 Upload Files

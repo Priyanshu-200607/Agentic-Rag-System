@@ -21,13 +21,17 @@ backend/chroma_db_multi/
 # Runtime files
 backend/history.json
 backend/db.json
-backend/knowledge_graph.db
+backend/knowledge_graph.db*
 
 # Uploaded documents (remove this if uploads are your source documents)
 backend/uploads/
 
 # Logs
-*.log
+logs/
+*.log*
+
+# Sessions
+backend/chat_sessions.json
 
 # IDE
 .vscode/

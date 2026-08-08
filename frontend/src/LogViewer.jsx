@@ -4,7 +4,10 @@ function LogViewer() {
   const [logs, setLogs] = useState([]);
   const [activeTab, setActiveTab] = useState('all'); // all, query, task, system
   const username = localStorage.getItem('username');
+  
   const endRef = useRef(null);
+  const scrollContainerRef = useRef(null);
+  const [isAutoScroll, setIsAutoScroll] = useState(true);
 
   useEffect(() => {
     fetchLogs();
@@ -13,8 +16,18 @@ function LogViewer() {
   }, [activeTab]);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
+    if (isAutoScroll && endRef.current) {
+      endRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [logs, isAutoScroll]);
+
+  const handleScroll = () => {
+    if (!scrollContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+    // If user is within 50px of bottom, auto scroll is enabled
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+    setIsAutoScroll(isAtBottom);
+  };
 
   const fetchLogs = async () => {
     try {
@@ -29,17 +42,18 @@ function LogViewer() {
   };
 
   const getLogColor = (line) => {
-    if (line.includes('[ERROR]') || line.includes('Failed') || line.includes('Error')) return 'text-error';
-    if (line.includes('[WARNING]')) return 'text-warning';
-    if (line.includes('[QUERY]')) return 'text-tertiary';
-    if (line.includes('[TASK]')) return 'text-primary';
-    if (line.includes('[SYSTEM]')) return 'text-on-surface-variant';
-    return 'text-on-surface';
+    if (line.includes('[ERROR]') || line.includes('Failed') || line.includes('Error')) return 'text-red-400 font-bold';
+    if (line.includes('[WARNING]')) return 'text-yellow-400 font-bold';
+    if (line.includes('[QUERY]')) return 'text-green-400';
+    if (line.includes('[TASK]')) return 'text-blue-400';
+    if (line.includes('[SYSTEM]')) return 'text-gray-400';
+    return 'text-gray-200';
   };
 
   return (
-    <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col h-full p-4 space-y-4">
+      {/* Header - Fixed Height */}
+      <div className="flex items-center justify-between shrink-0">
         <h2 className="font-headline-md text-lg text-on-surface flex items-center gap-2">
           <span className="material-symbols-outlined text-primary">terminal</span>
           Unified Log Viewer
@@ -57,7 +71,12 @@ function LogViewer() {
         </div>
       </div>
       
-      <div className="bg-[#1e1e1e] rounded-xl p-4 h-64 overflow-y-auto font-mono text-xs shadow-inner">
+      {/* Logs Container - Flexible Height & Scrollable */}
+      <div 
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="bg-black/95 rounded-xl p-4 flex-1 overflow-y-auto font-mono text-sm shadow-inner min-h-0"
+      >
         {logs.length === 0 ? (
           <div className="text-on-surface-variant/50 italic text-center mt-10">No logs available for this filter...</div>
         ) : (
