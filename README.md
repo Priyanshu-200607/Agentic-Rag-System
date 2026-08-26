@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧠 Multi-Department Agentic RAG System
+# Multi-Department Agentic RAG System
 
 **A secure, on-premise Hybrid GraphRAG platform that lets HR, IT, Finance, and any other department maintain isolated knowledge bases — while an intelligent multi-agent orchestrator routes, retrieves, and synthesizes answers in real time.**
 
@@ -12,9 +12,20 @@
 
 </div>
 
+<p align="center">
+  <a href="#overview">Overview</a> •
+  <a href="#key-features">Features</a> •
+  <a href="#system-architecture">Architecture</a> •
+  <a href="#data-flow">Data Flow</a> •
+  <a href="#tech-stack">Tech Stack</a> •
+  <a href="#getting-started">Getting Started</a> •
+  <a href="#security-model">Security</a> •
+  <a href="#roadmap">Roadmap</a>
+</p>
+
 ---
 
-## 📖 Overview
+## Overview
 
 This system is an **enterprise-grade Retrieval-Augmented Generation (RAG) platform** built for organizations that need AI-powered internal search *without* sending a single byte of data to an external API.
 
@@ -24,29 +35,31 @@ Everything — embeddings, LLM inference, vector storage, and graph storage — 
 
 ---
 
-## ✨ Key Features
+## Key Features
 
-- 🧭 **Zero Hard-Coded Routing** — The Master Agent uses an LLM to decide whether a question belongs to HR, IT, both, or neither. No manual routing rules to maintain.
-- 🔐 **Granular RBAC Security** — Role-based access control ensures a user (e.g., an intern) can never retrieve data from a department they aren't authorized to see — even if they explicitly ask for it.
-- 🕸️ **Hybrid Retrieval (Vector + Graph)** — Combines ChromaDB semantic search with a NetworkX/SQLite knowledge graph for precise, multi-hop, entity-level facts that plain vector search misses.
-- 🛠️ **ReAct Tool-Use Agents** — Department agents autonomously choose between `search_vector_db`, `search_knowledge_graph`, and `search_exact_text` tools to answer a query — no brittle, hallucination-prone Text-to-SQL required.
-- ⚙️ **Hardware-Aware Adaptive Extraction** — A built-in Resource Manager detects available VRAM and automatically switches between fast REBEL-based graph extraction (consumer GPUs) and high-quality LLM-based extraction (enterprise GPUs).
-- 📊 **Real-Time System Monitoring** — An integrated System Status dashboard provides live hardware telemetry (CPU, RAM, GPU), vector database sizing, and cache controls right from the admin UI.
-- 🔒 **Fully Local & Private** — Runs entirely on `ollama` + `ChromaDB` + `SQLite`. No data ever leaves your infrastructure.
-- 🧩 **Modular, Centralized Codebase** — Clean separation of concerns (`rag_system.py`, `department_agent.py`, `resource_manager.py`) with all settings centralized in `config.py`.
+| | |
+|---|---|
+| 🧭 **Zero Hard-Coded Routing** | The Master Agent uses an LLM to decide whether a question belongs to HR, IT, both, or neither — no manual routing rules to maintain. |
+| 🔐 **Granular RBAC Security** | Role-based access control ensures a user (e.g., an intern) can never retrieve data from a department they aren't authorized to see — even if they explicitly ask for it. |
+| 🕸️ **Hybrid Retrieval (Vector + Graph)** | Combines ChromaDB semantic search with a NetworkX/SQLite knowledge graph for precise, multi-hop, entity-level facts that plain vector search misses. |
+| 🛠️ **ReAct Tool-Use Agents** | Department agents autonomously choose between `search_vector_db`, `search_knowledge_graph`, and `search_exact_text` tools to answer a query — no brittle, hallucination-prone Text-to-SQL required. |
+| ⚙️ **Hardware-Aware Adaptive Extraction** | A built-in Resource Manager detects available VRAM and automatically switches between fast REBEL-based graph extraction (consumer GPUs) and high-quality LLM-based extraction (enterprise GPUs). |
+| 📊 **Real-Time System Monitoring** | An integrated System Status dashboard provides live hardware telemetry (CPU, RAM, GPU), vector database sizing, and cache controls right from the admin UI. |
+| 🔒 **Fully Local & Private** | Runs entirely on `ollama` + `ChromaDB` + `SQLite`. No data ever leaves your infrastructure. |
+| 🧩 **Modular, Centralized Codebase** | Clean separation of concerns (`rag_system.py`, `department_agent.py`, `resource_manager.py`) with all settings centralized in `config.py`. |
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
-The system is built around a two-tier **Agentic Orchestrator** pattern:
+The system is built around a two-tier **Agentic Orchestrator** pattern.
 
-### 1. Master Agent (Orchestrator)
+**1. Master Agent (Orchestrator)**
 - **Access Control (RBAC):** Validates the user's role before any retrieval happens.
 - **Intelligent Routing:** Uses an LLM to determine which department(s) are relevant to the query.
 - **Synthesis:** Merges responses from multiple department agents into one cohesive answer.
 
-### 2. Department Agents
+**2. Department Agents**
 - Each department runs as an independent agent with its **own isolated ChromaDB collection**.
 - Agents follow a **ReAct loop**, autonomously invoking tools to search vectors, traverse the knowledge graph, or perform exact substring lookups before reporting a summarized answer back to the Master Agent.
 
@@ -54,7 +67,7 @@ The system is built around a two-tier **Agentic Orchestrator** pattern:
 
 ---
 
-## 🔄 Data Flow
+## Data Flow
 
 ### Document Ingestion (Admin Upload)
 
@@ -108,7 +121,7 @@ flowchart TD
 
 ---
 
-## 🧰 Tech Stack
+## Tech Stack
 
 | Layer | Technology | Purpose |
 |---|---|---|
@@ -124,15 +137,16 @@ flowchart TD
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
+
 - Python 3.9+ (if running manually)
 - Docker & Docker Compose (recommended)
 - Node.js (for running UI dev servers)
 - [Ollama](https://ollama.com/) installed and running locally with your chosen model (default: `llama3`)
 
-### Installation & Running (Docker - Recommended)
+### Installation & Running (Docker — Recommended)
 
 ```bash
 # 1. Clone the repository
@@ -146,42 +160,18 @@ npm run build
 cd ..
 
 # 3. Start services with Docker Compose
+# For CPU / Apple Silicon (Mac unified memory):
 docker-compose up --build -d
+
+# For NVIDIA GPU servers / Linux desktops:
+docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d
 ```
+
 Then open **http://localhost:8000** in your browser.
-
-### Installation & Running (Manual)
-
-If you prefer not to use Docker, use the auto-installer to set up the backend:
-
-```bash
-# 1. Run the interactive auto-installer (creates env/)
-python install.py
-
-# 2. Start the Backend API
-cd backend
-# Linux/Mac: source env/bin/activate
-# Windows: env\Scripts\activate
-uvicorn api:app --reload
-```
-
-In a separate terminal, start the Frontend Development Server:
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-*(Optional)* You can also explore the Landing Page website:
-```bash
-cd website
-npm install
-npm run dev
-```
 
 ### Try It Out
 
-1. Open the Chat/Admin UI in your browser (at `http://localhost:8000` via Docker, or the Vite URL like `http://localhost:5173` via manual run).
+1. Open the Chat/Admin UI in your browser (at `http://localhost:8000` via Docker).
 2. Log in as `admin` (password: `123`) to unlock upload permissions.
 3. Explore the **Admin Dashboard** to manage users, roles, and department access permissions.
 4. Visit the **System Status** dashboard to monitor real-time RAM, GPU usage, and vector DB stats.
@@ -190,24 +180,41 @@ npm run dev
 
 ---
 
-## 🔐 Security Model
+## Security Model
 
 Role-Based Access Control (RBAC) is enforced at the Master Agent level *before* any retrieval occurs. A user without Finance permissions cannot retrieve Finance data — regardless of how the query is phrased — because the Master Agent filters candidate departments by role prior to invoking any Department Agent.
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
+**Performance & Retrieval Speed**
+- [ ] Aggressive Semantic Caching — instant responses (ms latency) for repeated queries
+- [ ] Semantic Routing — zero-shot classification (e.g., all-MiniLM + SVM) to bypass LLM routing overhead
+- [ ] Parallel Speculative Retrieval — query Vector DB, Graph DB, and exact match simultaneously, ranked via Cross-Encoder
+
+**Massive Context & Hardware Optimization**
+- [ ] AirLLM Integration — run 70B models or 1M+ context windows on consumer 8GB GPUs for deep cross-departmental analysis
+- [ ] Hybrid Routing System — fast paths (local Ollama) for simple queries vs. heavy paths (AirLLM) for massive context queries
+
+**Advanced Architecture**
+- [ ] The "Tensor-Graph" Engine — a unified Rust/C++ storage structure for simultaneous mathematical vector search and multi-hop graph traversal
+- [ ] Automated Knowledge Graph Pruning & Healing — background workers for entity deduplication and graph cleanliness
+
+**Private Cloud & Enterprise Hosting**
+- [ ] RunPod / Modal Deployment — scale-to-zero containerized GPU operations for cost efficiency
+- [ ] AWS ECS (Fargate) / VPC Integration — secure, private-cloud enterprise deployments ensuring strict data isolation
+
+**Security & Operations (Existing Goals)**
 - [ ] Confidence-based fallback for query routing misclassification
 - [ ] Conflict-resolution logic in the Master Synthesizer for cross-department answers
 - [ ] SSO / OAuth2 / LDAP integration for enterprise auth
 - [ ] Automated test suite and CI/CD pipeline
 - [ ] Monitoring & alerting stack for production observability
-- [ ] Optional Text-to-SQL tool (read-only, sandboxed) for precise aggregation queries
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 department_rag/
@@ -222,16 +229,16 @@ department_rag/
 ├── frontend/                 # React + Vite Chat & Admin UI
 ├── website/                  # React + Three.js Landing Page
 ├── docker-compose.yml        # Docker Compose configuration
-├── install.py                # Cross-platform auto-installer
+├── docker-compose.gpu.yml    # Hardware-specific Docker overrides
 └── report.md                 # Original architectural proposal
 ```
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Issues and pull requests are welcome. Please open an issue first to discuss significant changes before submitting a PR.
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License — see the `LICENSE` file for details.

@@ -84,6 +84,15 @@ function Admin() {
     loadData();
   };
 
+  const deleteDepartment = async (name) => {
+    if (!window.confirm(`Delete department ${name}? This will clear all its data.`)) return;
+    await fetch(`http://127.0.0.1:8000/admin/departments/${name}`, {
+      method: "DELETE",
+      headers: { "x-username": username },
+    });
+    loadData();
+  };
+
   const addUser = async () => {
     const { username: u, password: p, role: r, access: a } = newUser;
     const cleanUser = u.trim().toLowerCase();
@@ -227,12 +236,20 @@ function Admin() {
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <button
-                            onClick={() => toggleDeptSuspend(d)}
-                            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-colors ${isActive ? "bg-warning text-black/80 hover:bg-warning-container" : "bg-success text-white hover:opacity-90"}`}
-                          >
-                            {isActive ? "Suspend" : "Activate"}
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => toggleDeptSuspend(d)}
+                              className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${isActive ? "bg-warning text-black/80 hover:bg-warning-container" : "bg-success text-white hover:opacity-90"}`}
+                            >
+                              {isActive ? "Suspend" : "Activate"}
+                            </button>
+                            <button
+                              onClick={() => deleteDepartment(d)}
+                              className="bg-error text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-red-700 transition-colors"
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

@@ -27,6 +27,22 @@ except ImportError:
 history_lock = threading.Lock()
 chat_sessions_lock = threading.Lock()
 
+def _restore_admin():
+    try:
+        db = load_db()
+        if "admin" not in db.get("users", {}):
+            db.setdefault("users", {})["admin"] = {
+                "password": "123",
+                "role": "admin",
+                "status": "active",
+                "allowed_departments": ["hr", "finance", "it"]
+            }
+            save_db(db)
+    except Exception as e:
+        logger.error(f"Failed to restore admin: {e}")
+
+_restore_admin()
+
 app = FastAPI()
 
 app.add_middleware(
@@ -378,6 +394,47 @@ def toggle_suspend_department(name: str, x_username: Optional[str] = Header(None
         current = db["departments"][name].get("status", "active")
         db["departments"][name]["status"] = "suspended" if current == "active" else "active"
         save_db(db)
+    return {"status": "success"}
+
+@app.delete("/admin/departments/{name}")
+def delete_department(name: str, x_username: Optional[str] = Header(None)):
+    _require_admin(x_username)
+    db = load_db()
+    
+    if name not in db.get("departments", {}):
+        raise HTTPException(status_code=404, detail="Department not found")
+        
+    # 1. Clear documents, Chroma collection, KG edges, and Agent cache
+    logger.info(f"[TASK] Deleting department and its data: {name}")
+    system.admin_clear_department(name)
+    
+    # 2. Cleanup upload history and physical files
+    history = load_history()
+    to_delete_files = [item["filename"] for item in history if item["department"] == name]
+    history = [item for item in history if item["department"] != name]
+    save_history(history)
+    
+    remaining_files = {item["filename"] for item in history}
+    for fname in to_delete_files:
+        if fname not in remaining_files:
+            fpath = os.path.join(config.UPLOAD_DIR, fname)
+            if os.path.exists(fpath):
+                try:
+                    os.remove(fpath)
+                except Exception:
+                    pass
+                    
+    # 3. Remove department from database
+    del db["departments"][name]
+    
+    # 4. Remove department from all users' allowed_departments
+    for user_data in db["users"].values():
+        allowed = user_data.get("allowed_departments", [])
+        if name in allowed:
+            allowed.remove(name)
+            
+    save_db(db)
+    logger.info(f"[SYSTEM] Admin {x_username} deleted department {name}")
     return {"status": "success"}
 
 def get_dir_size(path):

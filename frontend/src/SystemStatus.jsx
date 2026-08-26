@@ -134,12 +134,18 @@ function SystemStatus() {
                   <div className="flex justify-between mb-1">
                     <span className="font-medium truncate">{task.task}</span>
                     <span className={`font-bold ${task.status === 'error' ? 'text-error' : task.status === 'completed' ? 'text-success' : 'text-primary'}`}>
-                      {task.status === 'running' ? `${Math.round((task.progress / task.total) * 100)}%` : task.status}
+                      {task.status === 'running' ? `${task.total > 0 ? Math.round((task.progress / task.total) * 100) : 0}%` : task.status}
                     </span>
                   </div>
                   {task.status === 'running' && (
-                    <div className="w-full bg-surface-container-high rounded-full h-1.5 mt-1">
-                      <div className="bg-primary h-1.5 rounded-full transition-all" style={{ width: `${(task.progress / task.total) * 100}%` }}></div>
+                    <div className="mt-1">
+                      <div className="w-full bg-surface-container-high rounded-full h-1.5 mb-1.5">
+                        <div className="bg-primary h-1.5 rounded-full transition-all" style={{ width: `${task.total > 0 ? (task.progress / task.total) * 100 : 0}%` }}></div>
+                      </div>
+                      <div className="flex flex-wrap justify-between text-[11px] text-on-surface-variant font-medium gap-x-2">
+                        <span>{task.progress} / {task.total}</span>
+                        {task.rate !== undefined && <span>{task.rate} ch/s</span>}
+                      </div>
                     </div>
                   )}
                   {task.error && <p className="text-xs text-error mt-1">{task.error}</p>}

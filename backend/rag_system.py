@@ -35,7 +35,7 @@ class MultiDeptRAG:
         self.embed_model_name = embed_model_name or config.EMBED_MODEL_NAME
         self.llm_model_name = llm_model_name or config.LLM_MODEL_NAME
 
-        self.embed_model = SentenceTransformer(self.embed_model_name)
+        self.embed_model = SentenceTransformer(self.embed_model_name, device=ResourceManager.get_device())
         self.client = chromadb.PersistentClient(path=self.db_path)
         self.agents = {}
         self.kg = KnowledgeGraph()
@@ -47,17 +47,63 @@ class MultiDeptRAG:
             DepartmentAgent(department_name, self.client, self.embed_model, self.llm_model_name, self.kg)
         )
 
-    def admin_upload_to_department(self, department_name, file_paths, chunk_size=500, overlap=100):
+    def admin_upload_to_department(self, department_name, file_paths, chunk_size=None, overlap=None):
         collection_name = get_collection_name(department_name)
         collection = self.client.get_or_create_collection(name=collection_name)
 
         documents = []
         metadatas = []
         from langchain_text_splitters import RecursiveCharacterTextSplitter
+        import os
+        
+        try:
+            from langchain_community.document_loaders.csv_loader import CSVLoader
+            from langchain_community.document_loaders import JSONLoader
+        except ImportError:
+            CSVLoader = None
+            JSONLoader = None
+            
+        chunk_params = ResourceManager.get_optimal_chunk_sizes()
+        chunk_size = chunk_size or chunk_params["chunk_size"]
+        overlap = overlap or chunk_params["overlap"]
+
         splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=overlap)
 
         for path in tqdm(file_paths, desc="Processing Documents"):
             path = path.strip()
+            ext = os.path.splitext(path)[1].lower()
+            
+            # Specialized structured chunking for CSV
+            if ext == ".csv" and CSVLoader:
+                try:
+                    loader = CSVLoader(file_path=path)
+                    docs = loader.load()
+                    for doc in docs:
+                        if doc.page_content.strip():
+                            documents.append(doc.page_content)
+                            metadatas.append({"source": path, "department": department_name})
+                    continue
+                except Exception as e:
+                    logger.warning(f"CSVLoader failed for {path}: {e}")
+                    
+            # Specialized structured chunking for JSON
+            if ext == ".json" and JSONLoader:
+                try:
+                    try:
+                        loader = JSONLoader(file_path=path, jq_schema=".[]", text_content=False)
+                        docs = loader.load()
+                    except Exception:
+                        loader = JSONLoader(file_path=path, jq_schema=".", text_content=False)
+                        docs = loader.load()
+                        
+                    for doc in docs:
+                        if doc.page_content.strip():
+                            documents.append(doc.page_content)
+                            metadatas.append({"source": path, "department": department_name})
+                    continue
+                except Exception as e:
+                    logger.warning(f"JSONLoader failed for {path}: {e}")
+
             text = process_file(path)
             if not text:
                 continue
@@ -94,43 +140,57 @@ class MultiDeptRAG:
                 # Process the chunks in massive parallel batches on the GPU
                 current_batch_size = ResourceManager.get_optimal_batch_sizes()["kg_batch"]
                 task_id = f"kg_{dept}_{uuid.uuid4().hex[:8]}"
-                background_tasks[task_id] = {"task": f"KG Extraction ({dept})", "progress": 0, "total": len(docs), "status": "running"}
+                start_time = time.time()
+                background_tasks[task_id] = {"task": f"KG Extraction ({dept})", "progress": 0, "total": len(docs), "status": "running", "rate": 0, "start_time": start_time}
                 
+                import concurrent.futures
+
                 with _kg_semaphore:
                     logger.info(f"[TASK] KG extraction started for {dept} ({len(docs)} chunks)...")
                     i = 0
                     pbar = tqdm(total=len(docs), desc=f"KG Extraction ({dept})", unit="chunk")
-
-                    while i < len(docs):
-                        current_batch_size = ResourceManager.check_memory_pressure(current_batch_size)
-                        batch = docs[i:i + current_batch_size]
-                        meta_batch = metas[i:i + current_batch_size]
-                        source_files = [m["source"] for m in meta_batch]
-                        
-                        try:
-                            facts_data = self.kg.extract_from_texts(batch, dept, source_files)
-                        except Exception as e:
-                            logger.error(f"[SYSTEM] Aborting KG extraction due to critical error: {e}")
-                            background_tasks[task_id]["status"] = "error"
-                            background_tasks[task_id]["error"] = str(e)
-                            break
-
-                        if facts_data:
-                            facts = [fd["fact"] for fd in facts_data]
-                            embeddings = self.embed_model.encode(facts, show_progress_bar=False).tolist()
-                            ids = [f"{dept}_kg_{i}_{j}" for j in range(len(facts))]
-                            metadatas = [{"source": fd.get("source_file") or "knowledge_graph", "department": dept, "type": "kg_fact"} for fd in facts_data]
-                            try:
-                                col = self.client.get_collection(name=get_collection_name(dept))
-                                col.add(ids=ids, documents=facts, embeddings=embeddings, metadatas=metadatas)
-                            except Exception as e:
-                                logger.error(f"[SYSTEM] Failed to add KG facts to Chroma: {e}")
-                                
-                        i += current_batch_size
-                        pbar.update(len(batch))
-                        background_tasks[task_id]["progress"] = min(i, len(docs))
-
                     
+                    def store_facts_to_chroma(facts_data, start_idx):
+                        if not facts_data: return
+                        facts = [fd["fact"] for fd in facts_data]
+                        embeddings = self.embed_model.encode(facts, show_progress_bar=False).tolist()
+                        ids = [f"{dept}_kg_{start_idx}_{j}" for j in range(len(facts))]
+                        metadatas = [{"source": fd.get("source_file") or "knowledge_graph", "department": dept, "type": "kg_fact"} for fd in facts_data]
+                        try:
+                            col = self.client.get_collection(name=get_collection_name(dept))
+                            col.add(ids=ids, documents=facts, embeddings=embeddings, metadatas=metadatas)
+                        except Exception as e:
+                            logger.error(f"[SYSTEM] Failed to add KG facts to Chroma: {e}")
+
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                        futures = []
+                        while i < len(docs):
+                            current_batch_size = ResourceManager.check_memory_pressure(current_batch_size)
+                            batch = docs[i:i + current_batch_size]
+                            meta_batch = metas[i:i + current_batch_size]
+                            source_files = [m["source"] for m in meta_batch]
+                            
+                            try:
+                                facts_data = self.kg.extract_from_texts(batch, dept, source_files)
+                            except Exception as e:
+                                logger.error(f"[SYSTEM] Aborting KG extraction due to critical error: {e}")
+                                background_tasks[task_id]["status"] = "error"
+                                background_tasks[task_id]["error"] = str(e)
+                                break
+
+                            if facts_data:
+                                futures.append(executor.submit(store_facts_to_chroma, facts_data, i))
+                                    
+                            i += current_batch_size
+                            pbar.update(len(batch))
+                            progress_val = min(i, len(docs))
+                            background_tasks[task_id]["progress"] = progress_val
+                            elapsed = time.time() - start_time
+                            if elapsed > 0:
+                                background_tasks[task_id]["rate"] = round(progress_val / elapsed, 1)
+
+                        concurrent.futures.wait(futures)
+
                     pbar.close()
                     self.kg.invalidate_cache()
                     
@@ -154,8 +214,14 @@ class MultiDeptRAG:
         collection_name = get_collection_name(department_name)
         try:
             self.client.get_collection(name=collection_name).delete(where={"source": file_path})
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[SYSTEM] ChromaDB delete warning: {e}")
+            
+        try:
+            self.kg.admin_delete_file(file_path)
+            logger.info(f"[TASK] Cleared KG edges for file: {file_path}")
+        except Exception as e:
+            logger.warning(f"[SYSTEM] KG DB delete warning: {e}")
 
     def admin_clear_department(self, department_name):
         """Delete ALL vectors and KG edges for a department in one operation."""

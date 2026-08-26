@@ -119,13 +119,29 @@ class KnowledgeGraph:
         self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS edges (
-                source TEXT, relation TEXT, target TEXT, department TEXT,
+                source TEXT, relation TEXT, target TEXT, department TEXT, source_file TEXT,
                 PRIMARY KEY (source, relation, target)
             )
         """)
+        
+        # Schema migration: add source_file if it doesn't exist (for existing DBs)
+        try:
+            self.conn.execute("ALTER TABLE edges ADD COLUMN source_file TEXT")
+        except sqlite3.OperationalError:
+            pass # Column already exists
+            
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_source ON edges(source)")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_target ON edges(target)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_source_file ON edges(source_file)")
         self.conn.commit()
+
+    def admin_delete_file(self, file_path):
+        """Delete all KG edges that were extracted from the given file_path."""
+        with self._write_lock:
+            self.conn.execute("DELETE FROM edges WHERE source_file = ?", (file_path,))
+            self.conn.commit()
+            self.load() # Rebuild in-memory graph
+        self.invalidate_cache()
 
     def load(self):
         self.graph = nx.DiGraph()
@@ -164,7 +180,7 @@ class KnowledgeGraph:
         with _entity_cache_lock:
             return len(_entity_cache)
 
-    def add_relationship(self, source, relation, target, department="global"):
+    def add_relationship(self, source, relation, target, department="global", source_file=None):
         source = self.canonicalize(source)
         target = self.canonicalize(target)
         relation = relation.strip().lower()
@@ -178,10 +194,9 @@ class KnowledgeGraph:
             # Fix #2: Acquire write lock before touching the graph or DB
             with self._write_lock:
                 self.conn.execute(
-                    "INSERT OR IGNORE INTO edges VALUES (?,?,?,?)",
-                    (source, relation, target, department)
+                    "INSERT OR IGNORE INTO edges VALUES (?,?,?,?,?)",
+                    (source, relation, target, department, source_file)
                 )
-                self.conn.commit()
                 self.graph.add_edge(source, target, label=relation, dept=department)
                 self._index_node(source)
                 self._index_node(target)
@@ -212,6 +227,9 @@ class KnowledgeGraph:
             print(f"[BACKGROUND TASK] Detected {vram_gb:.1f}GB VRAM. Using REBEL for Fast KG Extraction...")
             extracted_facts = self._extract_with_rebel(texts, department_name, source_files)
             
+        with self._write_lock:
+            self.conn.commit()
+            
         return extracted_facts
         
     def _extract_with_llm(self, texts, department_name="global", source_files=None):
@@ -234,7 +252,7 @@ class KnowledgeGraph:
                 for line in response.message.content.split('\n'):
                     parts = [p.strip() for p in line.split('|')]
                     if len(parts) == 3:
-                        fact = self.add_relationship(parts[0], parts[1], parts[2], department_name)
+                        fact = self.add_relationship(parts[0], parts[1], parts[2], department_name, src_file)
                         if fact: extracted_facts.append({"fact": fact, "source_file": src_file})
             except Exception as e:
                 print(f"KG Extraction Error (LLM): {e}")
@@ -269,7 +287,7 @@ class KnowledgeGraph:
                 src_file = source_files[i] if source_files else None
                 relations = parse_rebel_output(decoded_text)
                 for rel in relations:
-                    fact = self.add_relationship(rel['head'], rel['type'], rel['tail'], department_name)
+                    fact = self.add_relationship(rel['head'], rel['type'], rel['tail'], department_name, src_file)
                     if fact: extracted_facts.append({"fact": fact, "source_file": src_file})
         except Exception as e:
             # Raise the exception so the master agent knows to abort the loop

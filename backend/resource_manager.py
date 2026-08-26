@@ -55,6 +55,18 @@ class ResourceManager:
         return {"kg_batch": kg_batch, "chroma_batch": chroma_batch}
 
     @staticmethod
+    def get_optimal_chunk_sizes():
+        device = ResourceManager.get_device()
+        if device == "cuda":
+            if HAS_TORCH:
+                vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                if vram_gb >= 20:
+                    return {"chunk_size": 1000, "overlap": 200}
+                elif vram_gb >= 12:
+                    return {"chunk_size": 750, "overlap": 150}
+        return {"chunk_size": 500, "overlap": 100}
+
+    @staticmethod
     def should_quantize_8bit():
         device = ResourceManager.get_device()
         if device != "cuda":
