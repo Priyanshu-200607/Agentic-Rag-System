@@ -10,20 +10,22 @@ log_file = os.path.join(LOG_DIR, "system.log")
 
 formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
 
-# Rotate at midnight, keep 30 days
-file_handler = TimedRotatingFileHandler(log_file, when="midnight", interval=1, backupCount=30)
-file_handler.setFormatter(formatter)
+logger = logging.getLogger("RAG_SYSTEM")
+logger.setLevel(logging.INFO)
 
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 
-logger = logging.getLogger("RAG_SYSTEM")
-logger.setLevel(logging.INFO)
-
 # Avoid duplicate handlers if reloaded
 if not logger.handlers:
-    logger.addHandler(file_handler)
     logger.addHandler(console_handler)
+    try:
+        # Rotate at midnight, keep 30 days
+        file_handler = TimedRotatingFileHandler(log_file, when="midnight", interval=1, backupCount=30)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    except (PermissionError, OSError) as e:
+        print(f"[LOGGER WARNING] Cannot write to log file {log_file} ({e}). Logging to console only.")
 
 def get_logger():
     return logger

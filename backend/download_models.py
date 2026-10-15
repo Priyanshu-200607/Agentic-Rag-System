@@ -15,4 +15,9 @@ snapshot_download(repo_id=kg_model)
 AutoTokenizer.from_pretrained(kg_model)
 AutoModelForSeq2SeqLM.from_pretrained(kg_model)
 
+# 3. Download Deduplication & Fast Routing Model
+minilm_model = "all-MiniLM-L6-v2"
+print(f"Downloading {minilm_model}...")
+SentenceTransformer(minilm_model)
+
 print("All models downloaded and cached successfully.")

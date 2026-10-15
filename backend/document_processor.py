@@ -10,34 +10,65 @@ def process_file(path: str) -> str:
     if ext in [".txt", ".md"]:
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
-    elif ext == ".pdf":
-        reader = PdfReader(path)
-        extracted_text = "\n".join(page.extract_text() or "" for page in reader.pages)
-        
-        # Fallback to OCR if standard text extraction yields very little text
-        if len(extracted_text.strip()) < 50:
+    elif ext in [".png", ".jpg", ".jpeg", ".tiff"]:
+        try:
+            import pytesseract
             try:
                 import cv2
                 import numpy as np
-                import pytesseract
-                from pdf2image import convert_from_path
-                
-                print(f"[OCR] Initiating Tesseract OCR for scanned PDF: {path}")
-                images = convert_from_path(path)
-                ocr_text = ""
-                for img in images:
-                    # Pre-process image (grayscale, thresholding) for accuracy
-                    img_np = np.array(img)
-                    gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
-                    processed_img = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
-                    ocr_text += pytesseract.image_to_string(processed_img) + "\n"
-                return ocr_text
-            except ImportError:
-                print("[OCR] Dependencies missing (cv2, numpy, pytesseract, pdf2image). Returning original text.")
-            except Exception as e:
-                print(f"[OCR] Failed to run OCR on {path}: {e}")
-                
-        return extracted_text
+                img = cv2.imread(path)
+                if img is not None:
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    processed = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+                    return pytesseract.image_to_string(processed)
+            except Exception:
+                pass
+
+            # Robust fallback to PIL Image
+            from PIL import Image
+            with Image.open(path) as pil_img:
+                return pytesseract.image_to_string(pil_img)
+        except Exception as e:
+            print(f"[OCR] Error processing image {path}: {e}")
+        return ""
+    elif ext == ".pdf":
+        try:
+            reader = PdfReader(path)
+        except Exception as e:
+            print(f"[PDF] Error opening PDF {path}: {e}")
+            return ""
+
+        page_texts = []
+        has_ocr_tools = False
+        try:
+            import cv2
+            import numpy as np
+            import pytesseract
+            from pdf2image import convert_from_path
+            has_ocr_tools = True
+        except ImportError:
+            pass
+
+        for page_idx, page in enumerate(reader.pages):
+            text = (page.extract_text() or "").strip()
+            # If page text is very sparse (< 40 chars) and OCR is available, fallback on that specific page
+            if len(text) < 40 and has_ocr_tools:
+                try:
+                    # Convert single page to avoid loading entire multi-page PDF into memory
+                    imgs = convert_from_path(path, first_page=page_idx + 1, last_page=page_idx + 1)
+                    if imgs:
+                        img_np = np.array(imgs[0])
+                        gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
+                        processed_img = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+                        ocr_result = pytesseract.image_to_string(processed_img).strip()
+                        if ocr_result:
+                            text = ocr_result
+                except Exception as e:
+                    print(f"[OCR] Page {page_idx + 1} OCR fallback failed: {e}")
+            if text:
+                page_texts.append(text)
+
+        return "\n\n".join(page_texts)
     elif ext == ".docx":
         doc = Document(path)
         return "\n".join(para.text for para in doc.paragraphs)

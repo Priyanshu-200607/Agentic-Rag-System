@@ -14,6 +14,7 @@ from resource_manager import ResourceManager
 from document_processor import process_file
 from department_agent import DepartmentAgent
 from kg_system import KnowledgeGraph
+from decision_engine import LocalDecisionEngine
 
 # Fix #3: Max concurrent KG extraction threads (prevents Ollama RAM saturation)
 _kg_semaphore = threading.Semaphore(1)
@@ -37,14 +38,15 @@ class MultiDeptRAG:
 
         self.embed_model = SentenceTransformer(self.embed_model_name, device=ResourceManager.get_device())
         self.client = chromadb.PersistentClient(path=self.db_path)
+        self.decision_engine = LocalDecisionEngine(device=ResourceManager.get_device())
         self.agents = {}
         self.kg = KnowledgeGraph()
-        logger.info("[SYSTEM] Master Agent and Department Agents ready.")
+        logger.info("[SYSTEM] Master Agent, System 1 Decision Engine, and Department Agents ready.")
 
     def get_agent(self, department_name):
         return self.agents.setdefault(
             department_name,
-            DepartmentAgent(department_name, self.client, self.embed_model, self.llm_model_name, self.kg)
+            DepartmentAgent(department_name, self.client, self.embed_model, self.llm_model_name, self.kg, self.decision_engine)
         )
 
     def admin_upload_to_department(self, department_name, file_paths, chunk_size=None, overlap=None):
@@ -250,64 +252,23 @@ class MultiDeptRAG:
         if department_name in self.agents:
             del self.agents[department_name]
 
-    def route_query(self, query, allowed_departments):
-        # Fix #4: Truncate query to prevent LLM context overflow in router
+    def route_query(self, query, allowed_departments, user_role="user"):
         query_truncated = query[:config.MAX_QUERY_CHARS]
-        prompt = f"""
-        You are a routing assistant. Decide which departments should be queried based on the query.
-        Available departments: {', '.join(allowed_departments)}
-
-        Query: {query_truncated}
-
-        Return ONLY a valid JSON list of department names from the available list. Use lowercase.
-        Example: ["hr", "finance"]
-        """
-        response = chat(
-            model=self.llm_model_name,
-            messages=[{"role": "user", "content": prompt}]
+        # Fast System 1 classification (<40ms) replacing slow 3s LLM routing
+        triage = self.decision_engine.triage_request(
+            query_truncated,
+            user_role=user_role,
+            allowed_departments=allowed_departments
         )
-
-        try:
-            content = response.message.content
-            start, end = content.find("["), content.find("]") + 1
-            if start != -1 and end != -1:
-                return [d.lower() for d in json.loads(content[start:end]) if d.lower() in allowed_departments]
-        except Exception:
-            pass
-        return allowed_departments
+        target_depts = triage.get("target_departments", allowed_departments)
+        valid = [d for d in target_depts if d in allowed_departments]
+        return valid if valid else allowed_departments
 
     def evaluate_response(self, query, draft_answer):
-        prompt = f"""
-        You are the Master Reviewer. 
-        The user asked: '{query}'
-        The Department Agent answered: '{draft_answer}'
-        
-        Rate how thoroughly this answers the user's original question on a scale of 1 to 10.
-        If the score is below 8, provide specific feedback on what is missing or what needs to be searched.
-        
-        Output EXACTLY in this JSON format:
-        {{"score": 8, "feedback": "good"}}
-        """
-        try:
-            response = chat(
-                model=self.llm_model_name,
-                messages=[{"role": "user", "content": prompt}],
-                options={"temperature": 0.0}
-            )
-            content = response.message.content
-            import re
-            match = re.search(r'\{.*\}', content, re.DOTALL)
-            if match:
-                import json
-                data = json.loads(match.group(0))
-                score = int(data.get("score", 10))
-                feedback = data.get("feedback", "")
-                logger.info(f"[QUERY] Evaluator gave score {score}/10")
-                return {"score": score, "feedback": feedback}
-        except Exception as e:
-            logger.error(f"[SYSTEM] Evaluation Error: {e}")
-        # Default to pass if evaluator fails to avoid breaking
-        return {"score": 10, "feedback": ""}
+        # Fast System 1 answer quality evaluation (<20ms) replacing slow token-by-token LLM scoring
+        result = self.decision_engine.evaluate_answer(query, draft_answer)
+        logger.info(f"[QUERY] System 1 Evaluator gave score {result['score']}/10: {result.get('feedback', '')}")
+        return result
 
     def process_request(self, query, username):
         logger.info(f"[QUERY] User {username} asked: {query}")
@@ -318,13 +279,14 @@ class MultiDeptRAG:
             yield json.dumps({"type": "answer", "message": "User not found."}) + "\n"
             return
 
+        user_role = users[username].get("role", "user")
         allowed_departments = users[username].get("allowed_departments", [])
         if not allowed_departments:
             yield json.dumps({"type": "answer", "message": "You do not have access to any departments."}) + "\n"
             return
 
         yield json.dumps({"type": "status", "message": "Routing query..."}) + "\n"
-        target_departments = self.route_query(query, allowed_departments)
+        target_departments = self.route_query(query, allowed_departments, user_role=user_role)
         
         active_target_departments = [
             dept for dept in target_departments

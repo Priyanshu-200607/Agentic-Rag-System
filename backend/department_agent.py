@@ -5,13 +5,14 @@ import config
 from resource_manager import ResourceManager
 
 class DepartmentAgent:
-    def __init__(self, department_name, client, embed_model, llm_model_name, kg=None):
+    def __init__(self, department_name, client, embed_model, llm_model_name, kg=None, decision_engine=None):
         self.department_name = department_name
         self.client = client
         self.embed_model = embed_model
         self.llm_model_name = llm_model_name
         self.collection_name = f"dept_{department_name}"
         self.kg = kg
+        self.decision_engine = decision_engine
 
     def search_vector_db(self, query_text, distance_threshold=1.5):
         try:
@@ -82,31 +83,20 @@ class DepartmentAgent:
     def query(self, query_text, distance_threshold=1.5):
         query_text_safe = query_text[:config.MAX_QUERY_CHARS]
         
-        # --- PHASE 3: SUB-SECOND ROUTING WITH JEV ---
-        try:
-            import typesafe_ai
-            jev = typesafe_ai.JevClient()
-            
-            # Step 3.2: Jev Semantic Routing (Sub-100ms classification)
-            jev_decision = jev.classify(
-                context=query_text_safe,
-                questions={
-                    "search_target": ["vector_db", "knowledge_graph", "exact_text"],
-                    "entity_to_extract": "string"
-                }
+        # --- PHASE 3: SUB-SECOND ROUTING WITH LOCAL DECISION ENGINE (LAYA / SYSTEM 1) ---
+        if self.decision_engine:
+            triage = self.decision_engine.triage_request(
+                query_text_safe,
+                allowed_departments=[self.department_name]
             )
-            
-            target = jev_decision.answers.get("search_target", "vector_db")
-            entity = jev_decision.answers.get("entity_to_extract", query_text_safe)
-            confidence = jev_decision.confidence.get("search_target", 1.0)
-            
-        except ImportError:
-            # Mock fallback if typesafe_ai isn't actually installed yet
-            print("[Warning] typesafe_ai SDK not found. Using fast heuristic routing.")
+            target = triage.get("retrieval_mode", "vector_db")
+            confidence = triage.get("confidence", 0.95)
+            entity = triage.get("extracted_entity", query_text_safe)
+        else:
             target = "vector_db"
+            confidence = 0.95
             entity = query_text_safe
-            confidence = 0.5 # Force parallel execution in fallback
-            if "relationship" in query_text_safe.lower() or "who is" in query_text_safe.lower():
+            if any(term in query_text_safe.lower() for term in ["relationship", "who is", "reports to", "connected to"]):
                 target = "knowledge_graph"
 
         # Step 3.3: Parallel Speculative Execution
@@ -114,10 +104,10 @@ class DepartmentAgent:
         import concurrent.futures
         
         if confidence < 0.85:
-            # Ambiguous query: Fire both in parallel!
+            # Ambiguous query: Fire both in parallel! Pass full query to vector DB (Fix Bug B4)
             print(f"[{self.department_name} Agent] Low routing confidence ({confidence}). Firing parallel hybrid search.")
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                future_vec = executor.submit(self.search_vector_db, entity, distance_threshold)
+                future_vec = executor.submit(self.search_vector_db, query_text_safe, distance_threshold)
                 future_kg = executor.submit(self.search_knowledge_graph, entity)
                 
                 obs_vec = future_vec.result()
@@ -130,9 +120,11 @@ class DepartmentAgent:
             if target == "knowledge_graph":
                 observation = self.search_knowledge_graph(entity)
             elif target == "exact_text":
-                observation = self.search_exact_text(entity)
+                exact_id = re.search(r'\b(user_\d+|req-\d+|id-\d+|log_\d+)\b', query_text_safe, re.IGNORECASE)
+                keyword = exact_id.group(0) if exact_id else entity
+                observation = self.search_exact_text(keyword)
             else:
-                observation = self.search_vector_db(entity, distance_threshold)
+                observation = self.search_vector_db(query_text_safe, distance_threshold)
 
         # Step 3.4: The Synthesizer (Single LLM Call)
         system_prompt = f"""You are an analytical agent for the {self.department_name} department.

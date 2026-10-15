@@ -86,26 +86,24 @@ def login(req: Login):
 def chat(req: Question):
     session_id = req.session_id or uuid.uuid4().hex
     
-    # Phase 5.2: The Jev Firewall (RBAC Security)
-    if config.EDITION == "enterprise":
-        try:
-            import typesafe_ai
-            jev = typesafe_ai.JevClient()
-            db = load_db()
-            user = db["users"].get(req.username, {})
-            user_role = user.get("role", "user")
-            
-            is_safe = jev.evaluate_boolean(
-                context=f"User Role: {user_role} | Query: {req.question}",
-                question="Does this query violate enterprise data isolation rules or ask for unauthorized sensitive data?"
-            )
-            if not is_safe:
-                return StreamingResponse(
-                    iter([json.dumps({"type": "answer", "message": "Error: Unauthorized access detected by security firewall."})]), 
-                    media_type="application/x-ndjson"
-                )
-        except ImportError:
-            pass # Fallback if SDK is not installed
+    # Phase 5.2: System 1 RBAC Security Firewall
+    db = load_db()
+    user = db["users"].get(req.username, {})
+    user_role = user.get("role", "user")
+    allowed_depts = user.get("allowed_departments", [])
+    
+    # Fast non-autoregressive triage & RBAC enforcement (<30ms)
+    triage = system.decision_engine.triage_request(
+        req.question,
+        user_role=user_role,
+        allowed_departments=allowed_depts
+    )
+    if not triage.get("is_safe", True):
+        logger.warning(f"[SECURITY] Blocked unauthorized query from {req.username} (role: {user_role}): {req.question}")
+        return StreamingResponse(
+            iter([json.dumps({"type": "answer", "message": "Error: Unauthorized access detected by security firewall."}) + "\n"]), 
+            media_type="application/x-ndjson"
+        )
             
     
     def generate():

@@ -1,4 +1,34 @@
-import networkx as nx
+try:
+    import networkx as nx
+except ImportError:
+    class SimpleDiGraph:
+        def __init__(self):
+            self.adj = {}
+            self.pred = {}
+            self.nodes = set()
+            self._edges = {}
+
+        def add_edge(self, u, v, **attrs):
+            self.nodes.add(u)
+            self.nodes.add(v)
+            self.adj.setdefault(u, set()).add(v)
+            self.pred.setdefault(v, set()).add(u)
+            self._edges[(u, v)] = attrs
+
+        def successors(self, u):
+            return list(self.adj.get(u, []))
+
+        def predecessors(self, u):
+            return list(self.pred.get(u, []))
+
+        def get_edge_data(self, u, v):
+            return self._edges.get((u, v), {})
+
+    class _NXFallback:
+        DiGraph = SimpleDiGraph
+
+    nx = _NXFallback()
+
 import sqlite3
 import re
 from tqdm import tqdm
@@ -106,7 +136,8 @@ def unload_rebel():
 # ----------------------------------
 
 class KnowledgeGraph:
-    def __init__(self):
+    def __init__(self, db_path=None):
+        self.db_path = db_path or config.KG_DB_PATH
         self.graph = nx.DiGraph()
         self.token_index = defaultdict(set)
         # Fix #2: Lock for thread-safe concurrent writes to the graph
@@ -115,7 +146,7 @@ class KnowledgeGraph:
         self.load()
 
     def _init_db(self):
-        self.conn = sqlite3.connect(KG_DB_FILE, check_same_thread=False)
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS edges (
@@ -203,10 +234,22 @@ class KnowledgeGraph:
             print(f"[KG] Found {len(merges)} duplicate pairs. Executing healing SQL...")
             with self._write_lock:
                 for canonical, duplicate in merges:
-                    self.conn.execute("UPDATE edges SET target = ? WHERE target = ?", (canonical, duplicate))
-                    self.conn.execute("UPDATE edges SET source = ? WHERE source = ?", (canonical, duplicate))
+                    # Safely relink edges without violating PRIMARY KEY (source, relation, target)
+                    self.conn.execute("""
+                        INSERT OR IGNORE INTO edges (source, relation, target, department, source_file)
+                        SELECT ?, relation, target, department, source_file FROM edges WHERE source = ?
+                    """, (canonical, duplicate))
+                    self.conn.execute("""
+                        INSERT OR IGNORE INTO edges (source, relation, target, department, source_file)
+                        SELECT source, relation, ?, department, source_file FROM edges WHERE target = ?
+                    """, (canonical, duplicate))
+                    self.conn.execute("DELETE FROM edges WHERE source = ? OR target = ?", (duplicate, duplicate))
+                
+                # Clean up any potential self-loops generated during node merge
+                self.conn.execute("DELETE FROM edges WHERE source = target")
                 self.conn.commit()
                 self.load() # Rebuild in-memory nx graph
+            self.invalidate_cache()
             print(f"[KG] Successfully pruned and merged {len(merges)} nodes.")
         else:
             print("[KG] Pruning complete: No duplicates found.")

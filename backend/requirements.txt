@@ -21,3 +21,4 @@ pdf2image
 opencv-python-headless
 numpy
 apscheduler
+laya
