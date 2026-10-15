@@ -152,6 +152,65 @@ class KnowledgeGraph:
             self._index_node(source)
             self._index_node(target)
 
+    def prune_duplicates(self, similarity_threshold=0.98):
+        """
+        Phase 4: Calculates cosine similarity between all node names using fast embeddings.
+        If two nodes cross the similarity_threshold, merge their edges into a single canonical node.
+        """
+        print("[KG] Starting automated Knowledge Graph pruning...")
+        
+        with self._write_lock:
+            nodes_cursor = self.conn.execute("SELECT DISTINCT source FROM edges UNION SELECT DISTINCT target FROM edges")
+            all_nodes = [row[0] for row in nodes_cursor.fetchall()]
+        
+        if not all_nodes:
+            print("[KG] Pruning complete: 0 nodes found.")
+            return
+
+        try:
+            from sentence_transformers import SentenceTransformer
+            from sentence_transformers.util import cos_sim
+        except ImportError:
+            print("[KG] Cannot prune: sentence_transformers missing.")
+            return
+            
+        print(f"[KG] Embedding {len(all_nodes)} nodes for similarity matching...")
+        # Using a fast, lightweight embedding model specifically for deduplication
+        model = SentenceTransformer('all-MiniLM-L6-v2', device=ResourceManager.get_device())
+        
+        embeddings = model.encode(all_nodes, convert_to_tensor=True)
+        similarity_matrix = cos_sim(embeddings, embeddings)
+        
+        merges = []
+        visited = set()
+        
+        for i in range(len(all_nodes)):
+            if i in visited:
+                continue
+            for j in range(i + 1, len(all_nodes)):
+                if j in visited:
+                    continue
+                if similarity_matrix[i][j] >= similarity_threshold:
+                    if len(all_nodes[i]) >= len(all_nodes[j]):
+                        canonical, duplicate = all_nodes[i], all_nodes[j]
+                    else:
+                        canonical, duplicate = all_nodes[j], all_nodes[i]
+                        
+                    merges.append((canonical, duplicate))
+                    visited.add(j)
+                    
+        if merges:
+            print(f"[KG] Found {len(merges)} duplicate pairs. Executing healing SQL...")
+            with self._write_lock:
+                for canonical, duplicate in merges:
+                    self.conn.execute("UPDATE edges SET target = ? WHERE target = ?", (canonical, duplicate))
+                    self.conn.execute("UPDATE edges SET source = ? WHERE source = ?", (canonical, duplicate))
+                self.conn.commit()
+                self.load() # Rebuild in-memory nx graph
+            print(f"[KG] Successfully pruned and merged {len(merges)} nodes.")
+        else:
+            print("[KG] Pruning complete: No duplicates found.")
+
     def canonicalize(self, raw: str) -> str:
         raw = raw.strip().lower()
         for entity_type, pattern in PATTERNS.items():

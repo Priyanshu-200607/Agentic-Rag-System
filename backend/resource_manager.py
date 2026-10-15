@@ -1,5 +1,6 @@
 import os
 import gc
+import json
 import config
 
 try:
@@ -8,87 +9,64 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
-try:
-    import torch
-    HAS_TORCH = True
-except ImportError:
-    HAS_TORCH = False
-
 class ResourceManager:
+    _hardware_config = None
+
+    @staticmethod
+    def _load_config():
+        if ResourceManager._hardware_config is None:
+            config_path = os.path.join(os.path.dirname(__file__), "hardware_config.json")
+            if os.path.exists(config_path):
+                with open(config_path, "r") as f:
+                    ResourceManager._hardware_config = json.load(f)
+            else:
+                # Safe fallback if boot script didn't run
+                ResourceManager._hardware_config = {
+                    "device": "cpu",
+                    "kg_batch": 4,
+                    "chroma_batch": 500,
+                    "chunk_size": 500,
+                    "overlap": 100,
+                    "quantize_8bit": False,
+                    "total_ram_gb": 8,
+                    "vram_gb": 0
+                }
+        return ResourceManager._hardware_config
+
     @staticmethod
     def get_device():
-        if not HAS_TORCH:
-            return "cpu"
-        if torch.cuda.is_available():
-            return "cuda"
-        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            return "mps"
-        return "cpu"
+        return ResourceManager._load_config().get("device", "cpu")
 
     @staticmethod
     def get_optimal_batch_sizes():
-        device = ResourceManager.get_device()
-        
-        # Default fallback
-        kg_batch = 8
-        chroma_batch = 1000
-
-        if device == "cuda":
-            # Rough VRAM heuristic
-            vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-            if vram_gb >= 20: # e.g. A100, RTX 3090, 4090
-                kg_batch = 128
-                chroma_batch = 10000
-            elif vram_gb >= 12: # e.g. RTX 4070
-                kg_batch = 32
-                chroma_batch = 5000
-            else: # e.g. RTX 4060 8GB
-                kg_batch = 16
-                chroma_batch = 2500
-        elif device == "mps": # MacBook
-            kg_batch = 8
-            chroma_batch = 1000
-        else: # CPU
-            kg_batch = 4
-            chroma_batch = 500
-            
-        return {"kg_batch": kg_batch, "chroma_batch": chroma_batch}
+        cfg = ResourceManager._load_config()
+        return {
+            "kg_batch": cfg.get("kg_batch", 8),
+            "chroma_batch": cfg.get("chroma_batch", 1000)
+        }
 
     @staticmethod
     def get_optimal_chunk_sizes():
-        device = ResourceManager.get_device()
-        if device == "cuda":
-            if HAS_TORCH:
-                vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                if vram_gb >= 20:
-                    return {"chunk_size": 1000, "overlap": 200}
-                elif vram_gb >= 12:
-                    return {"chunk_size": 750, "overlap": 150}
-        return {"chunk_size": 500, "overlap": 100}
+        cfg = ResourceManager._load_config()
+        return {
+            "chunk_size": cfg.get("chunk_size", 500),
+            "overlap": cfg.get("overlap", 100)
+        }
 
     @staticmethod
     def should_quantize_8bit():
-        device = ResourceManager.get_device()
-        if device != "cuda":
-            return False
-            
-        # Check if bitsandbytes is available
-        try:
-            import bitsandbytes
-            HAS_BNB = True
-        except ImportError:
-            HAS_BNB = False
-            
-        if not HAS_BNB:
-            return False
-            
-        # Check VRAM limit
-        vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        return vram_gb < 12  # Quantize if less than 12GB VRAM to prevent OOM
+        return ResourceManager._load_config().get("quantize_8bit", False)
 
     @staticmethod
     def check_memory_pressure(current_batch_size, min_batch_size=2):
         """Active backpressure: check system RAM and VRAM, throttle if needed."""
+        
+        # Phase 1.4: Hybrid Backpressure
+        if os.getenv("DEPLOYMENT_TYPE", "cloud") == "on_premise":
+            # We trust the boot configuration fully. We own the server.
+            return current_batch_size
+
+        # Cloud deployment: dynamic checks for shared nodes
         pressure_detected = False
         
         # 1. Check System RAM
@@ -98,11 +76,11 @@ class ResourceManager:
                 print(f"[Resource Manager] CRITICAL: System RAM at {ram_percent}%. Engaging backpressure.")
                 pressure_detected = True
 
-        # 2. Check GPU VRAM
+        # 2. Check GPU VRAM (Fallback to basic check if Torch is installed in cloud)
         device = ResourceManager.get_device()
-        if device == "cuda" and HAS_TORCH:
+        if device == "cuda":
             try:
-                # reserved memory vs total memory
+                import torch
                 total = torch.cuda.get_device_properties(0).total_memory
                 reserved = torch.cuda.memory_reserved(0)
                 vram_percent = (reserved / total) * 100
@@ -115,8 +93,12 @@ class ResourceManager:
         if pressure_detected:
             # Trigger garbage collection and cache clearing
             gc.collect()
-            if device == "cuda" and HAS_TORCH:
-                torch.cuda.empty_cache()
+            if device == "cuda":
+                try:
+                    import torch
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
                 
             # Throttle batch size
             new_batch = max(min_batch_size, current_batch_size // 2)

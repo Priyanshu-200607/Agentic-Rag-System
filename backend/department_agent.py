@@ -82,64 +82,76 @@ class DepartmentAgent:
     def query(self, query_text, distance_threshold=1.5):
         query_text_safe = query_text[:config.MAX_QUERY_CHARS]
         
-        system_prompt = f"""You are an analytical agent for the {self.department_name} department.
-            You MUST use the available tools to find information before answering.
-            Available tools:
-            1. search_vector_db(query): Good for semantic searches, policies, general text.
-            2. search_knowledge_graph(entity): Good for exploring entity relationships.
-            3. search_exact_text(keyword): Good for EXACT substring matches like log IDs ('sync_salesforce_45'), exact dates, or specific acronyms ('CAC'). Use this if vector search fails to find a specific ID.
-
-            IMPORTANT RESOLUTION RULE:
-            If you see conflicting information across chunks, look at the [Source: filename] metadata. 
-            ALWAYS prioritize files with "current" or newer years (e.g. 2025) over files with "past", "archived", or older years (e.g. 2023).
-
-            To use a tool, output exactly in this format:
-            Action: tool_name
-            Action Input: input_string
-
-            Then I will provide the Observation.
-            Once you have the answer, output:
-            Final Answer: your detailed answer based ONLY on the observations.
-
-            User Query: {query_text_safe}
-            """
-        
-        messages = [{"role": "system", "content": system_prompt}]
-        
-        max_steps = 4
-        for step in range(max_steps):
-            response = chat(
-                model=self.llm_model_name,
-                messages=messages,
-                options={"temperature": 0.0}
+        # --- PHASE 3: SUB-SECOND ROUTING WITH JEV ---
+        try:
+            import typesafe_ai
+            jev = typesafe_ai.JevClient()
+            
+            # Step 3.2: Jev Semantic Routing (Sub-100ms classification)
+            jev_decision = jev.classify(
+                context=query_text_safe,
+                questions={
+                    "search_target": ["vector_db", "knowledge_graph", "exact_text"],
+                    "entity_to_extract": "string"
+                }
             )
-            content = response.message.content
-            messages.append({"role": "assistant", "content": content})
             
-            if "Final Answer:" in content:
-                # Extract just the final answer part
-                return content.split("Final Answer:")[-1].strip()
-                
-            action_match = re.search(r"Action:\s*(.*)", content)
-            input_match = re.search(r"Action Input:\s*(.*)", content)
+            target = jev_decision.answers.get("search_target", "vector_db")
+            entity = jev_decision.answers.get("entity_to_extract", query_text_safe)
+            confidence = jev_decision.confidence.get("search_target", 1.0)
             
-            if action_match and input_match:
-                action = action_match.group(1).strip()
-                action_input = input_match.group(1).strip().strip('"').strip("'")
+        except ImportError:
+            # Mock fallback if typesafe_ai isn't actually installed yet
+            print("[Warning] typesafe_ai SDK not found. Using fast heuristic routing.")
+            target = "vector_db"
+            entity = query_text_safe
+            confidence = 0.5 # Force parallel execution in fallback
+            if "relationship" in query_text_safe.lower() or "who is" in query_text_safe.lower():
+                target = "knowledge_graph"
+
+        # Step 3.3: Parallel Speculative Execution
+        observation = ""
+        import concurrent.futures
+        
+        if confidence < 0.85:
+            # Ambiguous query: Fire both in parallel!
+            print(f"[{self.department_name} Agent] Low routing confidence ({confidence}). Firing parallel hybrid search.")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                future_vec = executor.submit(self.search_vector_db, entity, distance_threshold)
+                future_kg = executor.submit(self.search_knowledge_graph, entity)
                 
-                observation = ""
-                if action == "search_vector_db":
-                    observation = self.search_vector_db(action_input, distance_threshold)
-                elif action == "search_knowledge_graph":
-                    observation = self.search_knowledge_graph(action_input)
-                elif action == "search_exact_text":
-                    observation = self.search_exact_text(action_input)
-                else:
-                    observation = "Invalid action."
-                    
-                messages.append({"role": "user", "content": f"Observation:\n{observation}"})
+                obs_vec = future_vec.result()
+                obs_kg = future_kg.result()
+                
+                observation = f"--- Vector DB Results ---\n{obs_vec}\n\n--- Knowledge Graph Results ---\n{obs_kg}"
+        else:
+            # High confidence: Direct routing
+            print(f"[{self.department_name} Agent] High routing confidence ({confidence}). Routing to {target}.")
+            if target == "knowledge_graph":
+                observation = self.search_knowledge_graph(entity)
+            elif target == "exact_text":
+                observation = self.search_exact_text(entity)
             else:
-                # If the LLM didn't format correctly, just try to answer
-                return content.strip()
-                
-        return "I don't know. (Max reasoning steps reached without a Final Answer)"
+                observation = self.search_vector_db(entity, distance_threshold)
+
+        # Step 3.4: The Synthesizer (Single LLM Call)
+        system_prompt = f"""You are an analytical agent for the {self.department_name} department.
+Your task is to answer the user's query based ONLY on the provided retrieved data chunks.
+If the data chunks do not contain the answer, state that you do not have enough information.
+
+IMPORTANT RESOLUTION RULE:
+If you see conflicting information across chunks, look at the [Source: filename] metadata. 
+ALWAYS prioritize files with "current" or newer years (e.g. 2025) over files with "past" or older years.
+"""
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"User Query: {query_text_safe}\n\nRetrieved Data:\n{observation}"}
+        ]
+
+        response = chat(
+            model=self.llm_model_name,
+            messages=messages,
+            options={"temperature": 0.0}
+        )
+        
+        return response.message.content.strip()

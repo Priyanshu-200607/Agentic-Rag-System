@@ -56,6 +56,16 @@ app.add_middleware(
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
 system = MultiDeptRAG()
 
+# Phase 4.3: Knowledge Graph Pruning Background Task
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(lambda: system.kg.prune_duplicates(), 'cron', hour=3, minute=0)
+    scheduler.start()
+    logger.info("Started BackgroundScheduler for nightly KG pruning.")
+except ImportError:
+    logger.warning("APScheduler not installed. KG pruning will not run automatically.")
+
 @app.post("/login")
 def login(req: Login):
     db = load_db()
@@ -75,6 +85,28 @@ def login(req: Login):
 @app.post("/chat")
 def chat(req: Question):
     session_id = req.session_id or uuid.uuid4().hex
+    
+    # Phase 5.2: The Jev Firewall (RBAC Security)
+    if config.EDITION == "enterprise":
+        try:
+            import typesafe_ai
+            jev = typesafe_ai.JevClient()
+            db = load_db()
+            user = db["users"].get(req.username, {})
+            user_role = user.get("role", "user")
+            
+            is_safe = jev.evaluate_boolean(
+                context=f"User Role: {user_role} | Query: {req.question}",
+                question="Does this query violate enterprise data isolation rules or ask for unauthorized sensitive data?"
+            )
+            if not is_safe:
+                return StreamingResponse(
+                    iter([json.dumps({"type": "answer", "message": "Error: Unauthorized access detected by security firewall."})]), 
+                    media_type="application/x-ndjson"
+                )
+        except ImportError:
+            pass # Fallback if SDK is not installed
+            
     
     def generate():
         final_answer = "Error generating response."

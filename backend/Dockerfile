@@ -5,6 +5,8 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
+    tesseract-ocr \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Install python dependencies
@@ -21,5 +23,5 @@ COPY . .
 # Expose API port
 EXPOSE 8000
 
-# Run the FastAPI server
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Generate config at runtime, then run the FastAPI server
+CMD ["/bin/bash", "-c", "python setup_hardware.py && uvicorn api:app --host 0.0.0.0 --port 8000"]

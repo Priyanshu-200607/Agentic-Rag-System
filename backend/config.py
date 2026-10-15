@@ -7,6 +7,7 @@ KG_MODEL_NAME = os.getenv("KG_MODEL_NAME", "Babelscape/rebel-large")
 ADAPTIVE_KG_EXTRACTION = True # If True, use LLM for extraction when VRAM is high, else fallback to REBEL
 
 # --- PATH CONFIGURATION ---
+EDITION = os.getenv("APP_EDITION", "opensource")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.join(BASE_DIR, "chroma_db_multi"))
 KG_DB_PATH = os.getenv("KG_DB_PATH", os.path.join(BASE_DIR, "knowledge_graph.db"))

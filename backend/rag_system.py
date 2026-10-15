@@ -115,7 +115,7 @@ class MultiDeptRAG:
                     metadatas.append({"source": path, "department": department_name})
 
         if documents:
-            # Encode embeddings on CPU — no GPU needed, frees VRAM
+            # Encode embeddings on the designated device (GPU if available)
             embeddings = self.embed_model.encode(documents, show_progress_bar=True).tolist()
             ids = [str(uuid.uuid4()) for _ in range(len(documents))]
 

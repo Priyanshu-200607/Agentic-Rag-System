@@ -16,3 +16,8 @@ accelerate
 GPUtil
 langchain-community
 jq
+pytesseract
+pdf2image
+opencv-python-headless
+numpy
+apscheduler
