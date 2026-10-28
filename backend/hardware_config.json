@@ -1,0 +1,31 @@
+{
+    "tier": "cpu_server",
+    "device": "cpu",
+    "total_ram_gb": 14.84,
+    "vram_gb": 0.0,
+    "cpu_cores": 16,
+    "cpu_features": {
+        "cores": 16,
+        "arch": "x86_64",
+        "has_avx": true,
+        "has_avx2": true,
+        "has_avx512": true
+    },
+    "gpu_info": {
+        "has_cuda": false,
+        "device_count": 0,
+        "devices": [],
+        "total_vram_gb": 0.0
+    },
+    "thread_tuning": {
+        "omp_num_threads": 14,
+        "mkl_num_threads": 14,
+        "torch_num_threads": 14
+    },
+    "sqlite_cache_kb": 2000000,
+    "kg_batch": 16,
+    "chroma_batch": 4000,
+    "chunk_size": 800,
+    "overlap": 150,
+    "quantize_8bit": false
+}

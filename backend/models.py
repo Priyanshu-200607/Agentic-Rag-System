@@ -22,3 +22,10 @@ class UserCreate(BaseModel):
 
 class AccessUpdate(BaseModel):
     allowed_departments: List[str]
+
+class SudoVerifyRequest(BaseModel):
+    username: str
+    password: str
+
+class SetupRequest(BaseModel):
+    admin_password: str

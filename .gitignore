@@ -29,6 +29,8 @@ backend/uploads/
 # Logs
 logs/
 *.log*
+*.jsonl
+backend/security_audit.jsonl
 
 # Sessions
 backend/chat_sessions.json

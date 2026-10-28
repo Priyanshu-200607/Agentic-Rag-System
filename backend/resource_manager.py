@@ -1,6 +1,7 @@
 import os
 import gc
 import json
+import sys
 import config
 
 try:
@@ -22,6 +23,7 @@ class ResourceManager:
             else:
                 # Safe fallback if boot script didn't run
                 ResourceManager._hardware_config = {
+                    "tier": "cpu_basic",
                     "device": "cpu",
                     "kg_batch": 4,
                     "chroma_batch": 500,
@@ -29,9 +31,52 @@ class ResourceManager:
                     "overlap": 100,
                     "quantize_8bit": False,
                     "total_ram_gb": 8,
-                    "vram_gb": 0
+                    "vram_gb": 0,
+                    "sqlite_cache_kb": 64000,
+                    "thread_tuning": {
+                        "omp_num_threads": 4,
+                        "mkl_num_threads": 4,
+                        "torch_num_threads": 4
+                    }
                 }
+            # Apply CPU thread optimizations at boot
+            ResourceManager.apply_thread_tuning()
         return ResourceManager._hardware_config
+
+    @staticmethod
+    def reload_config():
+        """Clears cached config and forces a reload (used after hardware re-sync)."""
+        ResourceManager._hardware_config = None
+        return ResourceManager._load_config()
+
+    @staticmethod
+    def apply_thread_tuning():
+        """Optimizes OpenMP, MKL, and PyTorch threads based on hardware profile."""
+        if not ResourceManager._hardware_config:
+            return
+        tt = ResourceManager._hardware_config.get("thread_tuning", {})
+        omp = str(tt.get("omp_num_threads", 4))
+        mkl = str(tt.get("mkl_num_threads", 4))
+        torch_t = tt.get("torch_num_threads", 4)
+        
+        os.environ["OMP_NUM_THREADS"] = omp
+        os.environ["MKL_NUM_THREADS"] = mkl
+        
+        if "torch" in sys.modules:
+            try:
+                import torch
+                torch.set_num_threads(torch_t)
+            except Exception:
+                pass
+
+    @staticmethod
+    def get_tier():
+        return ResourceManager._load_config().get("tier", "cpu_basic")
+
+    @staticmethod
+    def get_sqlite_cache_size():
+        """Returns optimal PRAGMA cache_size in KB (e.g. 2,000,000 KB for 2GB cache on RAM servers)."""
+        return ResourceManager._load_config().get("sqlite_cache_kb", 64000)
 
     @staticmethod
     def get_device():
@@ -61,12 +106,10 @@ class ResourceManager:
     def check_memory_pressure(current_batch_size, min_batch_size=2):
         """Active backpressure: check system RAM and VRAM, throttle if needed."""
         
-        # Phase 1.4: Hybrid Backpressure
+        # On-premise deployment: trust the boot configuration fully
         if os.getenv("DEPLOYMENT_TYPE", "cloud") == "on_premise":
-            # We trust the boot configuration fully. We own the server.
             return current_batch_size
 
-        # Cloud deployment: dynamic checks for shared nodes
         pressure_detected = False
         
         # 1. Check System RAM
@@ -76,7 +119,7 @@ class ResourceManager:
                 print(f"[Resource Manager] CRITICAL: System RAM at {ram_percent}%. Engaging backpressure.")
                 pressure_detected = True
 
-        # 2. Check GPU VRAM (Fallback to basic check if Torch is installed in cloud)
+        # 2. Check GPU VRAM
         device = ResourceManager.get_device()
         if device == "cuda":
             try:
@@ -91,7 +134,6 @@ class ResourceManager:
                 pass
                 
         if pressure_detected:
-            # Trigger garbage collection and cache clearing
             gc.collect()
             if device == "cuda":
                 try:
@@ -100,7 +142,6 @@ class ResourceManager:
                 except Exception:
                     pass
                 
-            # Throttle batch size
             new_batch = max(min_batch_size, current_batch_size // 2)
             if new_batch < current_batch_size:
                 print(f"[Resource Manager] Throttling batch size from {current_batch_size} to {new_batch}.")
@@ -115,10 +156,7 @@ class ResourceManager:
         if "gemma2" in name or "llama2" in name:
             return 8000
         elif "llama3" in name:
-            # Llama 3/3.1 supports massive context
             return 128000
         elif "mistral" in name or "mixtral" in name:
             return 32000
-        
-        # Fallback to config default
         return config.MAX_CONTEXT_CHARS

@@ -1,10 +1,15 @@
-from fastapi import FastAPI, Form, File, UploadFile, HTTPException, Header
+from fastapi import FastAPI, Form, File, UploadFile, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from rag_system import MultiDeptRAG
-from models import Question, Upload, Login, UserCreate, AccessUpdate
-from auth import load_db, save_db
+from models import Question, Upload, Login, UserCreate, AccessUpdate, SudoVerifyRequest, SetupRequest
+from auth import (
+    load_db, save_db, hash_password, verify_password,
+    generate_sudo_token, verify_sudo_token, check_admin_sudo_barrier, _DEFAULT_HASH_123
+)
+from audit_logger import log_security_event
+from resource_manager import ResourceManager
 import os
 import json
 from typing import Optional
@@ -32,7 +37,7 @@ def _restore_admin():
         db = load_db()
         if "admin" not in db.get("users", {}):
             db.setdefault("users", {})["admin"] = {
-                "password": "123",
+                "password_hash": _DEFAULT_HASH_123,
                 "role": "admin",
                 "status": "active",
                 "allowed_departments": ["hr", "finance", "it"]
@@ -67,28 +72,102 @@ except ImportError:
     logger.warning("APScheduler not installed. KG pruning will not run automatically.")
 
 @app.post("/login")
-def login(req: Login):
+def login(req: Login, request: Request):
     db = load_db()
+    client_ip = request.client.host if request.client else "unknown"
     if req.username not in db["users"]:
+        log_security_event("LOGIN_FAIL", req.username, client_ip, "FAILED", {"reason": "user_not_found"})
         return {"success": False, "message": "User not found"}
     user = db["users"][req.username]
-    if req.password != user["password"]:
+    stored_hash = user.get("password_hash") or user.get("password", "")
+    if not verify_password(req.password, stored_hash):
+        log_security_event("LOGIN_FAIL", req.username, client_ip, "FAILED", {"reason": "incorrect_password"})
         return {"success": False, "message": "Incorrect password"}
     if user.get("status") == "suspended":
+        log_security_event("LOGIN_BLOCKED", req.username, client_ip, "BLOCKED", {"reason": "account_suspended"})
         return {"success": False, "message": "Account suspended"}
+    log_security_event("LOGIN_SUCCESS", req.username, client_ip, "SUCCESS", {"role": user.get("role")})
     return {
         "success": True,
         "username": req.username,
-        "role": user["role"]
+        "role": user["role"],
+        "setup_completed": db.get("setup_completed", False)
+    }
+
+@app.get("/api/setup/status")
+def get_setup_status():
+    """Returns whether initial administrative setup has been completed."""
+    db = load_db()
+    return {"setup_completed": db.get("setup_completed", False)}
+
+@app.post("/api/setup")
+def setup_wizard(req: SetupRequest, request: Request):
+    """Setup wizard to set master administrator password on first run."""
+    db = load_db()
+    client_ip = request.client.host if request.client else "unknown"
+    if db.get("setup_completed", False):
+        log_security_event("SETUP_WIZARD_LOCKED", "anonymous", client_ip, "BLOCKED", {"reason": "already_initialized"})
+        raise HTTPException(status_code=403, detail="Forbidden: Initial setup has already been completed. Use administrative profile settings to update credentials.")
+    if len(req.admin_password) < 8:
+        raise HTTPException(status_code=400, detail="Administrator password must be at least 8 characters long.")
+    
+    db.setdefault("users", {}).setdefault("admin", {
+        "role": "admin",
+        "status": "active",
+        "allowed_departments": ["hr", "finance", "it"]
+    })
+    db["users"]["admin"]["password_hash"] = hash_password(req.admin_password)
+    db["setup_completed"] = True
+    save_db(db)
+    log_security_event("SETUP_WIZARD_COMPLETED", "admin", client_ip, "SUCCESS")
+    return {"success": True, "message": "Administrator master credentials configured."}
+
+@app.post("/api/admin/verify-sudo")
+def verify_admin_sudo(req: SudoVerifyRequest, request: Request):
+    """Elevated confirmation barrier: generates a short-lived 5-minute elevated token."""
+    db = load_db()
+    client_ip = request.client.host if request.client else "unknown"
+    user = db.get("users", {}).get(req.username)
+    if not user or user.get("role") != "admin":
+        log_security_event("SUDO_AUTH_FAIL", req.username, client_ip, "DENIED", {"reason": "not_admin"})
+        raise HTTPException(status_code=403, detail="Forbidden: Sudo verification requires an active administrator account.")
+    
+    stored_hash = user.get("password_hash") or user.get("password", "")
+    if not verify_password(req.password, stored_hash):
+        log_security_event("SUDO_AUTH_FAIL", req.username, client_ip, "FAILED", {"reason": "incorrect_password"})
+        raise HTTPException(status_code=401, detail="Invalid administrator credentials.")
+        
+    token = generate_sudo_token(req.username, client_ip)
+    log_security_event("SUDO_AUTH_SUCCESS", req.username, client_ip, "SUCCESS", {"token_ttl": 300})
+    return {
+        "success": True,
+        "sudo_token": token,
+        "expires_in": 300,
+        "message": "Sudo privileges granted for 5 minutes."
     }
 
 @app.post("/chat")
-def chat(req: Question):
+def chat(req: Question, request: Request):
     session_id = req.session_id or uuid.uuid4().hex
+    client_ip = request.client.host if request.client else "unknown"
     
-    # Phase 5.2: System 1 RBAC Security Firewall
+    # Phase 5.2: User authentication & account validation
     db = load_db()
-    user = db["users"].get(req.username, {})
+    if not req.username or req.username not in db.get("users", {}):
+        log_security_event("UNAUTHORIZED_CHAT_ATTEMPT", req.username or "anonymous", client_ip, "DENIED", {"reason": "user_not_found"})
+        return StreamingResponse(
+            iter([json.dumps({"type": "answer", "message": "Error: Unauthorized access. Please log in with a valid account."}) + "\n"]), 
+            media_type="application/x-ndjson"
+        )
+
+    user = db["users"][req.username]
+    if user.get("status") == "suspended":
+        log_security_event("SUSPENDED_USER_CHAT_BLOCKED", req.username, client_ip, "BLOCKED", {"reason": "account_suspended"})
+        return StreamingResponse(
+            iter([json.dumps({"type": "answer", "message": "Error: Your account is suspended. Contact an administrator."}) + "\n"]), 
+            media_type="application/x-ndjson"
+        )
+
     user_role = user.get("role", "user")
     allowed_depts = user.get("allowed_departments", [])
     
@@ -99,6 +178,7 @@ def chat(req: Question):
         allowed_departments=allowed_depts
     )
     if not triage.get("is_safe", True):
+        log_security_event("FIREWALL_QUERY_BLOCKED", req.username, client_ip, "BLOCKED", {"query": req.question[:100], "role": user_role})
         logger.warning(f"[SECURITY] Blocked unauthorized query from {req.username} (role: {user_role}): {req.question}")
         return StreamingResponse(
             iter([json.dumps({"type": "answer", "message": "Error: Unauthorized access detected by security firewall."}) + "\n"]), 
@@ -106,9 +186,15 @@ def chat(req: Question):
         )
             
     
+    # Load past session messages to feed conversational context to query condensation
+    session_history = []
+    with chat_sessions_lock:
+        sessions_data = load_chat_sessions()
+        session_history = sessions_data.get(req.username, {}).get(session_id, [])
+
     def generate():
         final_answer = "Error generating response."
-        for chunk in system.process_request(req.question, username=req.username):
+        for chunk in system.process_request(req.question, username=req.username, chat_history=session_history):
             yield chunk
             # Extract final answer if it's the answer type
             try:
@@ -279,7 +365,12 @@ def get_history(username: str):
     }
 
 @app.delete("/upload/{department}/{filename}")
-def delete_file(department: str, filename: str, x_username: Optional[str] = Header(None)):
+def delete_file(
+    department: str, 
+    filename: str, 
+    request: Request,
+    x_username: Optional[str] = Header(None)
+):
     _require_admin(x_username)
     safe_filename = os.path.basename(filename)
     file_path = os.path.join(config.UPLOAD_DIR, safe_filename)
@@ -303,12 +394,19 @@ def delete_file(department: str, filename: str, x_username: Optional[str] = Head
     if not remaining_in_dept:
         system.admin_clear_department(department)
         
+    client_ip = request.client.host if request.client else "unknown"
+    log_security_event("FILE_DELETED", x_username or "admin", client_ip, "SUCCESS", {"department": department, "filename": safe_filename})
     return {"status": "success"}
 
 @app.delete("/upload/{department}")
-def clear_department_docs(department: str, x_username: Optional[str] = Header(None)):
-    """Wipe ALL documents and KG facts for an entire department in one shot."""
-    _require_admin(x_username)
+def clear_department_docs(
+    department: str, 
+    request: Request,
+    x_username: Optional[str] = Header(None),
+    x_admin_sudo_token: Optional[str] = Header(None)
+):
+    """Wipe ALL documents and KG facts for an entire department in one shot (Admin Sudo Protected)."""
+    _require_admin_sudo(request, x_username=x_username, x_admin_sudo_token=x_admin_sudo_token)
     logger.info(f"[TASK] Clearing department data: {department}")
 
     system.admin_clear_department(department)
@@ -333,6 +431,9 @@ def clear_department_docs(department: str, x_username: Optional[str] = Header(No
                     os.remove(fpath)
                 except Exception:
                     pass
+
+    client_ip = request.client.host if request.client else "unknown"
+    log_security_event("DEPARTMENT_DOCS_CLEARED", x_username or "admin", client_ip, "SUCCESS", {"department": department, "deleted_count": len(to_delete_files)})
     return {"status": "success", "message": f"All documents cleared for department: {department}"}
 
 
@@ -347,50 +448,119 @@ def _require_admin(x_username: Optional[str] = Header(None)):
     if db["users"][x_username].get("status") == "suspended":
         raise HTTPException(status_code=403, detail="Forbidden: Account suspended.")
 
+def _require_admin_sudo(
+    request: Request,
+    x_username: Optional[str] = Header(None),
+    x_admin_sudo_token: Optional[str] = Header(None)
+):
+    _require_admin(x_username)
+    client_ip = request.client.host if request.client else "unknown"
+    enforce = os.getenv("ENFORCE_ADMIN_SUDO", "false").lower() == "true"
+    allowed, err_msg = check_admin_sudo_barrier(
+        username=x_username,
+        sudo_token=x_admin_sudo_token,
+        ip_address=client_ip,
+        enforce=enforce
+    )
+    if not allowed:
+        log_security_event("SUDO_BARRIER_FAIL", x_username, client_ip, "BLOCKED", {"reason": err_msg})
+        raise HTTPException(status_code=403, detail=err_msg)
+
 @app.get("/admin/users")
 def get_users(x_username: Optional[str] = Header(None)):
     _require_admin(x_username)
     return load_db()["users"]
 
 @app.post("/admin/users")
-def create_user(req: UserCreate, x_username: Optional[str] = Header(None)):
-    _require_admin(x_username)
+def create_user(
+    req: UserCreate, 
+    request: Request,
+    x_username: Optional[str] = Header(None),
+    x_admin_sudo_token: Optional[str] = Header(None)
+):
+    _require_admin_sudo(request, x_username=x_username, x_admin_sudo_token=x_admin_sudo_token)
     db = load_db()
     db["users"][req.username] = {
-        "password": req.password,
+        "password_hash": hash_password(req.password),
         "role": req.role,
         "status": "active",
         "allowed_departments": req.allowed_departments
     }
     save_db(db)
+    client_ip = request.client.host if request.client else "unknown"
+    log_security_event("USER_CREATED", x_username or "admin", client_ip, "SUCCESS", {"created_user": req.username, "role": req.role})
     return {"status": "success"}
 
 @app.delete("/admin/users/{username}")
-def delete_user(username: str, x_username: Optional[str] = Header(None)):
-    _require_admin(x_username)
+def delete_user(
+    username: str, 
+    request: Request,
+    x_username: Optional[str] = Header(None),
+    x_admin_sudo_token: Optional[str] = Header(None)
+):
+    _require_admin_sudo(request, x_username=x_username, x_admin_sudo_token=x_admin_sudo_token)
     db = load_db()
     if username in db["users"]:
         del db["users"][username]
         save_db(db)
+    client_ip = request.client.host if request.client else "unknown"
+    log_security_event("USER_DELETED", x_username or "admin", client_ip, "SUCCESS", {"deleted_user": username})
     return {"status": "success"}
 
+@app.post("/api/admin/system/hardware-sync")
+def hardware_sync(
+    request: Request,
+    x_username: Optional[str] = Header(None),
+    x_admin_sudo_token: Optional[str] = Header(None)
+):
+    """
+    Automated hardware discovery and re-benchmarking endpoint (Admin Sudo Protected).
+    Re-probes CPU/GPU, updates hardware_config.json, and reloads ResourceManager.
+    """
+    _require_admin_sudo(request, x_username=x_username, x_admin_sudo_token=x_admin_sudo_token)
+    from setup_hardware import calculate_hardware_config
+    new_profile = calculate_hardware_config()
+    ResourceManager.reload_config()
+    
+    client_ip = request.client.host if request.client else "unknown"
+    log_security_event("HARDWARE_SYNC_EXECUTED", x_username or "admin", client_ip, "SUCCESS", {"tier": new_profile.get("tier")})
+    return {
+        "status": "success",
+        "message": "Hardware re-benchmarked and profile updated successfully.",
+        "hardware_profile": new_profile
+    }
+
 @app.put("/admin/users/{username}/suspend")
-def toggle_suspend_user(username: str, x_username: Optional[str] = Header(None)):
+def toggle_suspend_user(
+    username: str, 
+    request: Request,
+    x_username: Optional[str] = Header(None)
+):
     _require_admin(x_username)
     db = load_db()
+    client_ip = request.client.host if request.client else "unknown"
     if username in db["users"]:
         current = db["users"][username].get("status", "active")
-        db["users"][username]["status"] = "suspended" if current == "active" else "active"
+        new_status = "suspended" if current == "active" else "active"
+        db["users"][username]["status"] = new_status
         save_db(db)
+        log_security_event("USER_STATUS_TOGGLED", x_username or "admin", client_ip, "SUCCESS", {"target_user": username, "new_status": new_status})
     return {"status": "success"}
 
 @app.put("/admin/users/{username}/access")
-def update_user_access(username: str, req: AccessUpdate, x_username: Optional[str] = Header(None)):
+def update_user_access(
+    username: str, 
+    req: AccessUpdate, 
+    request: Request,
+    x_username: Optional[str] = Header(None)
+):
     _require_admin(x_username)
     db = load_db()
+    client_ip = request.client.host if request.client else "unknown"
     if username in db["users"]:
         db["users"][username]["allowed_departments"] = req.allowed_departments
         save_db(db)
+        log_security_event("USER_ACCESS_UPDATED", x_username or "admin", client_ip, "SUCCESS", {"target_user": username, "allowed_departments": req.allowed_departments})
     return {"status": "success"}
 
 @app.get("/admin/departments")
@@ -403,7 +573,11 @@ def get_departments(x_username: Optional[str] = Header(None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/admin/departments/{name}")
-def create_department(name: str, x_username: Optional[str] = Header(None)):
+def create_department(
+    name: str, 
+    request: Request,
+    x_username: Optional[str] = Header(None)
+):
     _require_admin(x_username)
     db = load_db()
     if name in db.get("departments", {}):
@@ -413,6 +587,8 @@ def create_department(name: str, x_username: Optional[str] = Header(None)):
     
     db.setdefault("departments", {})[name] = {"status": "active"}
     save_db(db)
+    client_ip = request.client.host if request.client else "unknown"
+    log_security_event("DEPARTMENT_CREATED", x_username or "admin", client_ip, "SUCCESS", {"department": name})
     logger.info(f"[SYSTEM] Admin {x_username} created department {name}")
     return {"status": "success"}
 
@@ -427,8 +603,13 @@ def toggle_suspend_department(name: str, x_username: Optional[str] = Header(None
     return {"status": "success"}
 
 @app.delete("/admin/departments/{name}")
-def delete_department(name: str, x_username: Optional[str] = Header(None)):
-    _require_admin(x_username)
+def delete_department(
+    name: str, 
+    request: Request,
+    x_username: Optional[str] = Header(None),
+    x_admin_sudo_token: Optional[str] = Header(None)
+):
+    _require_admin_sudo(request, x_username=x_username, x_admin_sudo_token=x_admin_sudo_token)
     db = load_db()
     
     if name not in db.get("departments", {}):
@@ -464,6 +645,8 @@ def delete_department(name: str, x_username: Optional[str] = Header(None)):
             allowed.remove(name)
             
     save_db(db)
+    client_ip = request.client.host if request.client else "unknown"
+    log_security_event("DEPARTMENT_DELETED", x_username or "admin", client_ip, "SUCCESS", {"department": name})
     logger.info(f"[SYSTEM] Admin {x_username} deleted department {name}")
     return {"status": "success"}
 

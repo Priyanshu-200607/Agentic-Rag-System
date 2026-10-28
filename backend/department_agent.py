@@ -3,6 +3,8 @@ import re
 from ollama import chat
 import config
 from resource_manager import ResourceManager
+from reranker import LocalReranker
+from hybrid_search import BM25Index, reciprocal_rank_fusion
 
 class DepartmentAgent:
     def __init__(self, department_name, client, embed_model, llm_model_name, kg=None, decision_engine=None):
@@ -13,30 +15,113 @@ class DepartmentAgent:
         self.collection_name = f"dept_{department_name}"
         self.kg = kg
         self.decision_engine = decision_engine
+        self.reranker = LocalReranker()
 
-    def search_vector_db(self, query_text, distance_threshold=1.5):
+    def search_vector_db(self, query_text, distance_threshold=1.5, user_role="employee"):
         try:
             collection = self.client.get_collection(name=self.collection_name)
         except Exception:
             return "No documents found."
+
+        # Role clearance hierarchy for Document-Level ABAC
+        role_hierarchy = {
+            "admin": {"admin", "manager", "employee", "user"},
+            "manager": {"manager", "employee", "user"},
+            "employee": {"employee", "user"},
+            "user": {"employee", "user"}
+        }
+        allowed_roles = role_hierarchy.get(user_role, {"employee", "user"})
+
+        # ChromaDB pre-filtering clause for Document-Level ABAC
+        where_clause = {"source": {"$ne": "knowledge_graph"}}
+        if user_role not in ("admin", "manager"):
+            where_clause = {
+                "$and": [
+                    {"source": {"$ne": "knowledge_graph"}},
+                    {"min_role": {"$ne": "admin"}},
+                    {"min_role": {"$ne": "manager"}}
+                ]
+            }
+        elif user_role == "manager":
+            where_clause = {
+                "$and": [
+                    {"source": {"$ne": "knowledge_graph"}},
+                    {"min_role": {"$ne": "admin"}}
+                ]
+            }
         
-        query_embedding = self.embed_model.encode([query_text]).tolist()
-        results = collection.query(
-            query_embeddings=query_embedding, 
-            n_results=5,
-            where={"source": {"$ne": "knowledge_graph"}}
-        )
-        
+        # 1. Candidate Retrieval: Retrieve candidate pool (up to 20 chunks)
+        candidate_docs = []
+        try:
+            query_embedding = self.embed_model.encode([query_text]).tolist()
+            try:
+                results = collection.query(
+                    query_embeddings=query_embedding, 
+                    n_results=20,
+                    where=where_clause
+                )
+            except Exception:
+                # Graceful fallback if database schema lacks min_role key
+                results = collection.query(
+                    query_embeddings=query_embedding, 
+                    n_results=20,
+                    where={"source": {"$ne": "knowledge_graph"}}
+                )
+
+            if results.get('documents') and results['documents'][0]:
+                docs = results['documents'][0]
+                metas = results['metadatas'][0] if results.get('metadatas') and results['metadatas'][0] else [{}] * len(docs)
+                distances = results['distances'][0] if results.get('distances') and results['distances'][0] else [0] * len(docs)
+                ids = results['ids'][0] if results.get('ids') and results['ids'][0] else [f"doc_{i}" for i in range(len(docs))]
+                
+                for doc_id, doc, meta, distance in zip(ids, docs, metas, distances):
+                    # Defense-in-depth: enforce document clearance level in memory
+                    doc_min_role = meta.get("min_role", "employee")
+                    if doc_min_role not in allowed_roles:
+                        continue
+
+                    if distance <= distance_threshold:
+                        candidate_docs.append({
+                            "id": doc_id,
+                            "text": doc,
+                            "metadata": meta,
+                            "distance": distance
+                        })
+        except Exception:
+            pass
+
+        if not candidate_docs:
+            return "No documents found."
+
+        # 2. Hybrid Lexical Search (BM25) & Reciprocal Rank Fusion (RRF)
+        try:
+            bm25 = BM25Index()
+            bm25.fit(candidate_docs)
+            lexical_candidates = bm25.search(query_text, top_n=20)
+            fused_candidates = reciprocal_rank_fusion(candidate_docs, lexical_candidates, k=60)
+        except Exception:
+            fused_candidates = candidate_docs
+
+        # 3. Cross-Encoder Reranking (top-50/20 down to top-5)
+        top_reranked = self.reranker.rerank(query_text, fused_candidates, top_n=5)
+
+        # 4. Context Assembly with Parent-Child De-duplication
         chunks = []
-        if results.get('documents') and results['documents'][0]:
-            docs = results['documents'][0]
-            metas = results['metadatas'][0] if results.get('metadatas') and results['metadatas'][0] else [{}] * len(docs)
-            distances = results['distances'][0] if results.get('distances') and results['distances'][0] else [0] * len(docs)
+        seen_parents = set()
+        
+        for cand in top_reranked:
+            meta = cand.get("metadata", {})
+            source = meta.get("source", "Unknown")
+            parent_id = meta.get("parent_id")
+            parent_text = meta.get("parent_text")
             
-            for doc, meta, distance in zip(docs, metas, distances):
-                if distance <= distance_threshold:
-                    source = meta.get('source', 'Unknown')
-                    chunks.append(f"[Source: {source}]\n{doc}")
+            if parent_id and parent_text:
+                if parent_id in seen_parents:
+                    continue
+                seen_parents.add(parent_id)
+                chunks.append(f"[Source: {source}]\n{parent_text}")
+            else:
+                chunks.append(f"[Source: {source}]\n{cand.get('text', '')}")
                 
         return "\n\n".join(chunks) if chunks else "No documents found."
 
@@ -59,7 +144,7 @@ class DepartmentAgent:
         return "\n".join(facts) if facts else "No facts found."
 
 
-    def search_exact_text(self, keyword):
+    def search_exact_text(self, keyword, user_role="employee"):
         try:
             collection = self.client.get_collection(name=self.collection_name)
         except Exception:
@@ -70,23 +155,44 @@ class DepartmentAgent:
             limit=15
         )
         
+        role_hierarchy = {
+            "admin": {"admin", "manager", "employee", "user"},
+            "manager": {"manager", "employee", "user"},
+            "employee": {"employee", "user"},
+            "user": {"employee", "user"}
+        }
+        allowed_roles = role_hierarchy.get(user_role, {"employee", "user"})
+
         chunks = []
+        seen_parents = set()
         if results and results.get('documents'):
             docs = results['documents']
             metas = results['metadatas'] if results.get('metadatas') else [{}] * len(docs)
             for doc, meta in zip(docs, metas):
+                doc_min_role = meta.get("min_role", "employee")
+                if doc_min_role not in allowed_roles:
+                    continue
                 source = meta.get('source', 'Unknown')
-                chunks.append(f"[Source: {source}]\n{doc}")
+                parent_id = meta.get("parent_id")
+                parent_text = meta.get("parent_text")
+                if parent_id and parent_text:
+                    if parent_id in seen_parents:
+                        continue
+                    seen_parents.add(parent_id)
+                    chunks.append(f"[Source: {source}]\n{parent_text}")
+                else:
+                    chunks.append(f"[Source: {source}]\n{doc}")
                 
         return "\n\n".join(chunks) if chunks else "No exact matches found."
 
-    def query(self, query_text, distance_threshold=1.5):
+    def query(self, query_text, distance_threshold=1.5, user_role="employee"):
         query_text_safe = query_text[:config.MAX_QUERY_CHARS]
         
         # --- PHASE 3: SUB-SECOND ROUTING WITH LOCAL DECISION ENGINE (LAYA / SYSTEM 1) ---
         if self.decision_engine:
             triage = self.decision_engine.triage_request(
                 query_text_safe,
+                user_role=user_role,
                 allowed_departments=[self.department_name]
             )
             target = triage.get("retrieval_mode", "vector_db")
@@ -107,7 +213,7 @@ class DepartmentAgent:
             # Ambiguous query: Fire both in parallel! Pass full query to vector DB (Fix Bug B4)
             print(f"[{self.department_name} Agent] Low routing confidence ({confidence}). Firing parallel hybrid search.")
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                future_vec = executor.submit(self.search_vector_db, query_text_safe, distance_threshold)
+                future_vec = executor.submit(self.search_vector_db, query_text_safe, distance_threshold, user_role)
                 future_kg = executor.submit(self.search_knowledge_graph, entity)
                 
                 obs_vec = future_vec.result()
@@ -122,9 +228,9 @@ class DepartmentAgent:
             elif target == "exact_text":
                 exact_id = re.search(r'\b(user_\d+|req-\d+|id-\d+|log_\d+)\b', query_text_safe, re.IGNORECASE)
                 keyword = exact_id.group(0) if exact_id else entity
-                observation = self.search_exact_text(keyword)
+                observation = self.search_exact_text(keyword, user_role=user_role)
             else:
-                observation = self.search_vector_db(query_text_safe, distance_threshold)
+                observation = self.search_vector_db(query_text_safe, distance_threshold, user_role=user_role)
 
         # Step 3.4: The Synthesizer (Single LLM Call)
         system_prompt = f"""You are an analytical agent for the {self.department_name} department.

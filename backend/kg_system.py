@@ -148,6 +148,8 @@ class KnowledgeGraph:
     def _init_db(self):
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.execute("PRAGMA journal_mode=WAL;")
+        cache_kb = ResourceManager.get_sqlite_cache_size()
+        self.conn.execute(f"PRAGMA cache_size = -{cache_kb};")
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS edges (
                 source TEXT, relation TEXT, target TEXT, department TEXT, source_file TEXT,

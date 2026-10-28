@@ -4,6 +4,7 @@ import Layout from "./Layout";
 function Admin() {
   const [departments, setDepartments] = useState({});
   const [users, setUsers] = useState({});
+  const [setupCompleted, setSetupCompleted] = useState(true);
   const username = localStorage.getItem("username");
 
   // Form states
@@ -40,6 +41,14 @@ function Admin() {
       );
       const userData = await userRes.json();
       setUsers(userData);
+
+      try {
+        const setupRes = await fetch(
+          `http://127.0.0.1:8000/api/setup/status?t=${Date.now()}`
+        );
+        const setupData = await setupRes.json();
+        setSetupCompleted(setupData.setup_completed !== false);
+      } catch (err) {}
 
       const initialAccess = {};
       Object.keys(userData).forEach((u) => {
@@ -182,6 +191,24 @@ function Admin() {
               Admin Dashboard
             </h1>
           </div>
+
+          {!setupCompleted && (
+            <div className="bg-amber-50 border-l-4 border-amber-500 p-4 m-6 mb-0 rounded-r-lg flex items-center justify-between shadow-sm">
+              <div className="flex items-center gap-3">
+                <span className="material-symbols-outlined text-amber-600 text-2xl">
+                  warning
+                </span>
+                <div>
+                  <p className="text-sm font-bold text-amber-900">
+                    Security Notice: System Provisioning Pending
+                  </p>
+                  <p className="text-xs text-amber-700">
+                    The master administrator account is running on default credentials. Run <code>./setup.sh</code> or <code>python scripts/setup_admin.py</code> to configure your master password.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Section: Departments */}
           <div className="p-6 space-y-6">

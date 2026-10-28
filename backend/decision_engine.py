@@ -39,8 +39,18 @@ class LocalDecisionEngine:
                 "extracted_entity": str
             }
         """
-        allowed = allowed_departments or ["hr", "finance", "it"]
+        allowed = allowed_departments if allowed_departments is not None else ["hr", "finance", "it"]
         query_safe = query.strip()
+
+        # Zero-trust enforcement: If user has zero authorized departments, fail-closed immediately
+        if not allowed:
+            return {
+                "is_safe": False,
+                "target_departments": [],
+                "retrieval_mode": "vector_db",
+                "confidence": 0.0,
+                "extracted_entity": query_safe
+            }
 
         # 1. Use Laya Neural Decision Engine if available
         if self.router:
@@ -115,6 +125,36 @@ class LocalDecisionEngine:
             "confidence": confidence,
             "extracted_entity": query_safe
         }
+
+    def condense_conversational_query(self, query: str, chat_history: list = None) -> str:
+        """
+        Rewrites conversational follow-up questions (e.g. 'What about his manager?' or 'And for 2025?')
+        into standalone queries incorporating prior conversational context.
+        """
+        if not chat_history or len(chat_history) < 2:
+            return query
+            
+        q_lower = query.strip().lower()
+        pronouns_or_ellipses = ["his", "her", "their", "it", "they", "he", "she", "what about", "how about", "and in", "same for", "that", "those", "previous"]
+        needs_context = any(p in q_lower for p in pronouns_or_ellipses) or len(q_lower.split()) <= 4
+        
+        if not needs_context:
+            return query
+            
+        last_turn = ""
+        for msg in reversed(chat_history):
+            if msg.get("sender") == "You" or msg.get("role") == "user":
+                last_turn = msg.get("text") or msg.get("content", "")
+                if last_turn and last_turn.strip().lower() != q_lower:
+                    break
+                    
+        if last_turn:
+            clean_last = re.sub(r'^(what|who|where|how|why|is|are|can|could|please)\b', '', last_turn.strip(), flags=re.I).strip(" ?.")
+            condensed = f"{clean_last}: {query.strip()}"
+            logger.info(f"[DECISION ENGINE] Condensed follow-up query: '{query}' -> '{condensed}'")
+            return condensed
+            
+        return query
 
     def evaluate_answer(self, query: str, answer: str) -> dict:
         """

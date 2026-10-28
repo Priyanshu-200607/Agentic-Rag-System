@@ -23,6 +23,31 @@ _kg_semaphore = threading.Semaphore(1)
 background_tasks = {}
 
 
+def determine_document_access_level(file_path: str, explicit_confidentiality: str = None) -> tuple:
+    """
+    Returns (confidentiality, min_role) for Document-Level ABAC.
+    Categories:
+      - 'restricted'   -> min_role 'admin'   (master credentials, executive compensation)
+      - 'confidential' -> min_role 'manager' (salaries, performance reviews, termination, nda)
+      - 'internal'     -> min_role 'employee' (general departmental procedures, guidelines)
+    """
+    if explicit_confidentiality in ("restricted", "confidential", "internal", "public"):
+        conf = explicit_confidentiality
+        min_role = "admin" if conf == "restricted" else ("manager" if conf == "confidential" else "employee")
+        return conf, min_role
+
+    import os
+    fname = os.path.basename(file_path).lower()
+    restricted_keywords = ["master_key", "secret", "private_key", "admin_credential", "executive_comp"]
+    confidential_keywords = ["salary", "salaries", "payroll", "compensation", "performance_review", "disciplinary", "termination", "audit_report", "tax_return", "nda"]
+    
+    if any(k in fname for k in restricted_keywords):
+        return "restricted", "admin"
+    elif any(k in fname for k in confidential_keywords):
+        return "confidential", "manager"
+    else:
+        return "internal", "employee"
+
 # Consistent collection naming — single source of truth for all files
 def get_collection_name(department_name: str) -> str:
     return f"dept_{department_name}"
@@ -74,6 +99,7 @@ class MultiDeptRAG:
         for path in tqdm(file_paths, desc="Processing Documents"):
             path = path.strip()
             ext = os.path.splitext(path)[1].lower()
+            doc_conf, doc_min_role = determine_document_access_level(path)
             
             # Specialized structured chunking for CSV
             if ext == ".csv" and CSVLoader:
@@ -83,7 +109,12 @@ class MultiDeptRAG:
                     for doc in docs:
                         if doc.page_content.strip():
                             documents.append(doc.page_content)
-                            metadatas.append({"source": path, "department": department_name})
+                            metadatas.append({
+                                "source": path,
+                                "department": department_name,
+                                "confidentiality": doc_conf,
+                                "min_role": doc_min_role
+                            })
                     continue
                 except Exception as e:
                     logger.warning(f"CSVLoader failed for {path}: {e}")
@@ -101,7 +132,12 @@ class MultiDeptRAG:
                     for doc in docs:
                         if doc.page_content.strip():
                             documents.append(doc.page_content)
-                            metadatas.append({"source": path, "department": department_name})
+                            metadatas.append({
+                                "source": path,
+                                "department": department_name,
+                                "confidentiality": doc_conf,
+                                "min_role": doc_min_role
+                            })
                     continue
                 except Exception as e:
                     logger.warning(f"JSONLoader failed for {path}: {e}")
@@ -110,11 +146,35 @@ class MultiDeptRAG:
             if not text:
                 continue
             
+            # Use Parent-Child chunking if available, preserving parent section context
+            try:
+                from document_processor import create_parent_child_chunks
+                pc_chunks = create_parent_child_chunks(text, source_file=path, department=department_name)
+                if pc_chunks:
+                    for pc in pc_chunks:
+                        documents.append(pc["text"])
+                        metadatas.append({
+                            "source": path,
+                            "department": department_name,
+                            "parent_id": pc["parent_id"],
+                            "parent_text": pc["parent_text"],
+                            "confidentiality": doc_conf,
+                            "min_role": doc_min_role
+                        })
+                    continue
+            except Exception as e:
+                logger.warning(f"Parent-child chunking fallback for {path}: {e}")
+
             chunks = splitter.split_text(text)
             for chunk in chunks:
                 if chunk.strip():
                     documents.append(chunk)
-                    metadatas.append({"source": path, "department": department_name})
+                    metadatas.append({
+                        "source": path,
+                        "department": department_name,
+                        "confidentiality": doc_conf,
+                        "min_role": doc_min_role
+                    })
 
         if documents:
             # Encode embeddings on the designated device (GPU if available)
@@ -270,8 +330,14 @@ class MultiDeptRAG:
         logger.info(f"[QUERY] System 1 Evaluator gave score {result['score']}/10: {result.get('feedback', '')}")
         return result
 
-    def process_request(self, query, username):
+    def process_request(self, query, username, chat_history=None):
         logger.info(f"[QUERY] User {username} asked: {query}")
+        
+        # Conversational Query Condensation: rewrite follow-up questions using chat context
+        effective_query = query
+        if chat_history and hasattr(self.decision_engine, "condense_conversational_query"):
+            effective_query = self.decision_engine.condense_conversational_query(query, chat_history)
+
         from auth import load_db
         db = load_db()
         users = db.get("users", {})
@@ -286,7 +352,7 @@ class MultiDeptRAG:
             return
 
         yield json.dumps({"type": "status", "message": "Routing query..."}) + "\n"
-        target_departments = self.route_query(query, allowed_departments, user_role=user_role)
+        target_departments = self.route_query(effective_query, allowed_departments, user_role=user_role)
         
         active_target_departments = [
             dept for dept in target_departments
@@ -303,12 +369,12 @@ class MultiDeptRAG:
         for dept in active_target_departments:
             yield json.dumps({"type": "status", "message": f"Querying department agent: {dept.upper()}..."}) + "\n"
             agent = self.get_agent(dept)
-            current_query = query
+            current_query = effective_query
             best_resp = ""
             success = False
             
             for attempt in range(2): # Max 2 attempts to prevent infinite loop
-                resp = agent.query(current_query)
+                resp = agent.query(current_query, user_role=user_role)
                 
                 if "I don't know" in resp or "No relevant information found" in resp or "No documents found" in resp:
                     if attempt == 1:

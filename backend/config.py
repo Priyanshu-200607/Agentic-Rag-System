@@ -1,5 +1,12 @@
 import os
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+except ImportError:
+    pass
+
 # --- MODEL CONFIGURATION ---
 LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "llama3")
 EMBED_MODEL_NAME = os.getenv("EMBED_MODEL_NAME", os.path.join(os.path.dirname(os.path.abspath(__file__)), "embedding_model"))
