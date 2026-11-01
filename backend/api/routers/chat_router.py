@@ -97,44 +97,52 @@ def chat(
 @router.get("/api/chat/sessions")
 @router.get("/chat/sessions")
 def get_sessions(
+    username: Optional[str] = None,
     x_username: Optional[str] = Header(None),
     state: StateProvider = Depends(get_state_provider)
 ):
-    if not x_username:
+    effective_username = x_username or username
+    if not effective_username:
         raise HTTPException(status_code=401, detail="Authentication required.")
-    return state.get_chat_sessions(x_username)
+    return state.get_chat_sessions(effective_username)
 
 @router.get("/api/chat/session/{session_id}")
 @router.get("/chat/session/{session_id}")
 def get_session(
     session_id: str,
+    username: Optional[str] = None,
     x_username: Optional[str] = Header(None),
     state: StateProvider = Depends(get_state_provider)
 ):
-    if not x_username:
+    effective_username = x_username or username
+    if not effective_username:
         raise HTTPException(status_code=401, detail="Authentication required.")
-    return state.get_chat_history(x_username, session_id)
+    return state.get_chat_history(effective_username, session_id)
 
 @router.post("/api/chat/session")
 @router.post("/chat/session")
 def create_session(
+    username: Optional[str] = None,
     x_username: Optional[str] = Header(None),
     state: StateProvider = Depends(get_state_provider)
 ):
-    if not x_username:
+    effective_username = x_username or username
+    if not effective_username:
         raise HTTPException(status_code=401, detail="Authentication required.")
     session_id = uuid.uuid4().hex
-    state.create_chat_session(x_username, session_id, title="New Chat")
+    state.create_chat_session(effective_username, session_id, title="New Chat")
     return {"session_id": session_id}
 
 @router.delete("/api/chat/session/{session_id}")
 @router.delete("/chat/session/{session_id}")
 def delete_session(
     session_id: str,
+    username: Optional[str] = None,
     x_username: Optional[str] = Header(None),
     state: StateProvider = Depends(get_state_provider)
 ):
-    if not x_username:
+    effective_username = x_username or username
+    if not effective_username:
         raise HTTPException(status_code=401, detail="Authentication required.")
-    success = state.delete_chat_session(x_username, session_id)
+    success = state.delete_chat_session(effective_username, session_id)
     return {"success": success}

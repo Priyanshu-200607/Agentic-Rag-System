@@ -23,6 +23,15 @@ except ImportError:
 
 router = APIRouter(tags=["System & Hardware"])
 
+@router.get("/api/system/health")
+@router.get("/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "service": "Multi-Department Agentic RAG Platform",
+        "version": "2.0.0"
+    }
+
 class LLMConfigUpdate(BaseModel):
     master_agent: str
     department_agent: str

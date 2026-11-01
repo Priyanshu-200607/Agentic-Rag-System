@@ -1,8 +1,8 @@
 {
-    "tier": "cpu_server",
-    "device": "cpu",
+    "tier": "gpu_workstation",
+    "device": "cuda",
     "total_ram_gb": 14.84,
-    "vram_gb": 0.0,
+    "vram_gb": 8.0,
     "cpu_cores": 16,
     "cpu_features": {
         "cores": 16,
@@ -12,20 +12,26 @@
         "has_avx512": true
     },
     "gpu_info": {
-        "has_cuda": false,
-        "device_count": 0,
-        "devices": [],
-        "total_vram_gb": 0.0
+        "has_cuda": true,
+        "device_count": 1,
+        "devices": [
+            {
+                "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+                "vram_gb": 8.0
+            }
+        ],
+        "total_vram_gb": 8.0
     },
+    "mps": false,
     "thread_tuning": {
         "omp_num_threads": 14,
         "mkl_num_threads": 14,
         "torch_num_threads": 14
     },
-    "sqlite_cache_kb": 2000000,
+    "sqlite_cache_kb": 64000,
     "kg_batch": 16,
-    "chroma_batch": 4000,
-    "chunk_size": 800,
-    "overlap": 150,
-    "quantize_8bit": false
+    "chroma_batch": 2500,
+    "chunk_size": 600,
+    "overlap": 120,
+    "quantize_8bit": true
 }

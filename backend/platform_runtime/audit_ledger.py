@@ -60,7 +60,9 @@ class AuditLedger:
         ip_address: str = "unknown",
         status: str = "SUCCESS",
         details: Optional[Dict[str, Any]] = None,
-        username: str = None
+        username: str = None,
+        client_ip: str = None,
+        **kwargs
     ) -> Dict[str, Any]:
         global AUDIT_LOG_FILE
         target_path = _get_audit_log_path()
@@ -68,13 +70,14 @@ class AuditLedger:
         AUDIT_LOG_FILE = target_path
 
         effective_actor = username or actor
+        effective_ip = client_ip or ip_address
 
         with _audit_lock:
             timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             details_clean = details or {}
             details_serialized = json.dumps(details_clean, sort_keys=True)
             
-            raw_payload = f"{self._last_hash}|{timestamp}|{event_type}|{effective_actor}|{ip_address}|{status}|{details_serialized}"
+            raw_payload = f"{self._last_hash}|{timestamp}|{event_type}|{effective_actor}|{effective_ip}|{status}|{details_serialized}"
             record_hash = hashlib.sha256(raw_payload.encode("utf-8")).hexdigest()
 
             entry = {
@@ -83,7 +86,7 @@ class AuditLedger:
                 "event_type": event_type,
                 "actor": effective_actor,
                 "username": effective_actor,
-                "ip_address": ip_address,
+                "ip_address": effective_ip,
                 "status": status,
                 "details": details_clean,
                 "prev_hash": self._last_hash,
@@ -138,5 +141,23 @@ def get_audit_ledger() -> AuditLedger:
         _global_ledger = AuditLedger()
     return _global_ledger
 
-def log_security_event(event_type: str, actor: str = "anonymous", ip_address: str = "unknown", status: str = "SUCCESS", details: dict = None, username: str = None):
-    return get_audit_ledger().log_event(event_type, actor=actor, ip_address=ip_address, status=status, details=details, username=username)
+def log_security_event(
+    event_type: str,
+    actor: str = "anonymous",
+    ip_address: str = "unknown",
+    status: str = "SUCCESS",
+    details: dict = None,
+    username: str = None,
+    client_ip: str = None,
+    **kwargs
+):
+    effective_ip = client_ip or ip_address
+    effective_actor = username or actor
+    return get_audit_ledger().log_event(
+        event_type,
+        actor=effective_actor,
+        ip_address=effective_ip,
+        status=status,
+        details=details,
+        **kwargs
+    )
