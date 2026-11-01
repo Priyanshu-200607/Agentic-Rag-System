@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.multistage
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_EDITION=opensource
+      - DEPLOYMENT_TYPE=on_premise
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - HF_HUB_OFFLINE=1
+      - TRANSFORMERS_OFFLINE=1
+    volumes:
+      - ../backend/uploads:/app/backend/uploads
+      - ../backend/logs:/app/backend/logs
+      - ../backend/chroma_db_multi:/app/backend/chroma_db_multi
+    restart: unless-stopped

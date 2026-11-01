@@ -1,0 +1,7 @@
+# NVIDIA CUDA Acceleration Profile (Linux / Windows with NVIDIA RTX/A100 GPUs)
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch>=2.2.0+cu121
+sentence-transformers>=3.0.0
+bitsandbytes>=0.43.0
+accelerate>=0.29.0
+gputil>=1.4.0

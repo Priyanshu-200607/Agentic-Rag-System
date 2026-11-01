@@ -22,6 +22,10 @@ backend/chroma_db_multi/
 backend/history.json
 backend/db.json
 backend/knowledge_graph.db*
+*.db*
+*.sqlite*
+*.safetensors
+*.bin
 
 # Uploaded documents (remove this if uploads are your source documents)
 backend/uploads/

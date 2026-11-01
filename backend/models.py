@@ -1,31 +1,9 @@
-from pydantic import BaseModel
-from typing import List, Optional
+"""
+Models Facade.
+Re-exports Pydantic domain models from core.schemas.
+"""
 
-class Question(BaseModel):
-    question: str
-    username: Optional[str] = None
-    session_id: Optional[str] = None
-
-class Upload(BaseModel):
-    department: str
-    file_paths: list[str]
-
-class Login(BaseModel):
-    username: str
-    password: str
-
-class UserCreate(BaseModel):
-    username: str
-    password: str
-    role: str
-    allowed_departments: List[str]
-
-class AccessUpdate(BaseModel):
-    allowed_departments: List[str]
-
-class SudoVerifyRequest(BaseModel):
-    username: str
-    password: str
-
-class SetupRequest(BaseModel):
-    admin_password: str
+from core.schemas import (
+    Question, Upload, Login, UserCreate, AccessUpdate,
+    SudoVerifyRequest, SetupRequest, User, ChatSession, ChatMessage
+)
