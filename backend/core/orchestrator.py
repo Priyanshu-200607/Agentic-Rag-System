@@ -10,6 +10,7 @@ import uuid
 import time
 import threading
 import logging
+import concurrent.futures
 from typing import Dict, Any, List, Optional, Generator
 
 import config
@@ -17,6 +18,7 @@ from core.decision_engine import LocalDecisionEngine
 from core.department_agent import DepartmentAgent
 from core.document_processor import process_file, determine_document_access_level
 from core.chunking import create_parent_child_chunks
+from core.hybrid_retriever import get_corpus_bm25_index
 from infrastructure.vector.base import VectorProvider
 from infrastructure.graph.base import GraphProvider
 from infrastructure.state.base import StateProvider
@@ -140,10 +142,14 @@ class MultiDeptRAG:
             raw_documents_for_kg.append(extracted_text)
             raw_metadatas_for_kg.append({"source": fpath, "department": department_name})
 
-        # Insert chunks via VectorProvider
+        # Insert chunks via VectorProvider and Corpus-Wide BM25 Index
         if all_hierarchical_chunks:
             self.vector_provider.insert_chunks(department_name, all_hierarchical_chunks)
-            logger.info(f"[UPLOAD] Successfully indexed {len(all_hierarchical_chunks)} chunks into {department_name}")
+            try:
+                get_corpus_bm25_index().add_chunks(department_name, all_hierarchical_chunks)
+            except Exception as e:
+                logger.warning(f"[UPLOAD] CorpusBM25 indexing error: {e}")
+            logger.info(f"[UPLOAD] Successfully indexed {len(all_hierarchical_chunks)} chunks into {department_name} (Vector & BM25)")
 
         # Trigger background Knowledge Graph extraction thread
         if raw_documents_for_kg and self.kg:
@@ -177,11 +183,19 @@ class MultiDeptRAG:
 
     def admin_delete_file(self, department_name: str, file_path: str):
         self.vector_provider.delete_by_source(department_name, file_path)
+        try:
+            get_corpus_bm25_index().delete_by_source(department_name, file_path)
+        except Exception as e:
+            logger.warning(f"[DELETE] CorpusBM25 delete error: {e}")
         if self.graph_provider:
             self.graph_provider.admin_delete_file(file_path)
 
     def admin_clear_department(self, department_name: str):
         self.vector_provider.delete_department(department_name)
+        try:
+            get_corpus_bm25_index().delete_department(department_name)
+        except Exception as e:
+            logger.warning(f"[CLEAR] CorpusBM25 clear error: {e}")
         if self.graph_provider:
             self.graph_provider.delete_department(department_name)
         if department_name in self.agents:
@@ -239,15 +253,35 @@ class MultiDeptRAG:
 
         yield json.dumps({"type": "status", "message": f"Querying {', '.join(active_target_departments)}..."}) + "\n"
 
+        # Concurrent Multi-Department Query Dispatch
         dept_answers = {}
-        for dept in active_target_departments:
+        if len(active_target_departments) == 1:
+            dept = active_target_departments[0]
             agent = self.get_agent(dept)
             ans = agent.query(effective_query, user_role=user_role)
             dept_answers[dept] = ans
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(active_target_departments))) as executor:
+                future_to_dept = {
+                    executor.submit(self.get_agent(dept).query, effective_query, 1.5, user_role): dept
+                    for dept in active_target_departments
+                }
+                for future in concurrent.futures.as_completed(future_to_dept):
+                    dept = future_to_dept[future]
+                    try:
+                        dept_answers[dept] = future.result()
+                    except Exception as e:
+                        logger.error(f"[QUERY] Agent {dept} error: {e}")
+                        dept_answers[dept] = f"Error querying {dept}: {e}"
 
         if len(dept_answers) == 1:
             dept = list(dept_answers.keys())[0]
             final_answer = dept_answers[dept]
+            # Emit token stream chunks for live UI rendering
+            words = final_answer.split(" ")
+            for i, word in enumerate(words):
+                token_text = word if i == len(words) - 1 else word + " "
+                yield json.dumps({"type": "token", "token": token_text}) + "\n"
         else:
             yield json.dumps({"type": "status", "message": "Synthesizing cross-department findings..."}) + "\n"
             combined_context = "\n\n".join([f"--- Department {dept} Findings ---\n{ans}" for dept, ans in dept_answers.items()])
@@ -255,10 +289,28 @@ class MultiDeptRAG:
 {combined_context}
 Question: {effective_query}
 """
-            final_answer = self.inference_provider.chat(
-                [{"role": "user", "content": synth_prompt}],
-                model=self.llm_model_name,
-                temperature=0.0
-            )
+            full_tokens = []
+            try:
+                for token in self.inference_provider.chat_stream(
+                    [{"role": "user", "content": synth_prompt}],
+                    model=self.llm_model_name,
+                    temperature=0.0
+                ):
+                    full_tokens.append(token)
+                    yield json.dumps({"type": "token", "token": token}) + "\n"
+                final_answer = "".join(full_tokens).strip()
+            except Exception:
+                final_answer = ""
+
+            if not final_answer:
+                final_answer = self.inference_provider.chat(
+                    [{"role": "user", "content": synth_prompt}],
+                    model=self.llm_model_name,
+                    temperature=0.0
+                )
+                words = final_answer.split(" ")
+                for i, word in enumerate(words):
+                    token_text = word if i == len(words) - 1 else word + " "
+                    yield json.dumps({"type": "token", "token": token_text}) + "\n"
 
         yield json.dumps({"type": "answer", "message": final_answer}) + "\n"

@@ -140,7 +140,7 @@ class LocalDecisionEngine:
             return query
             
         q_lower = query.strip().lower()
-        pronouns_or_ellipses = ["his", "her", "their", "it", "they", "he", "she", "what about", "how about", "and in", "same for", "that", "those", "previous"]
+        pronouns_or_ellipses = ["his", "her", "their", "it", "they", "he", "she", "what about", "how about", "and in", "same for", "that", "those", "previous", "and for"]
         needs_context = any(p in q_lower for p in pronouns_or_ellipses) or len(q_lower.split()) <= 4
         
         if not needs_context:
@@ -154,7 +154,9 @@ class LocalDecisionEngine:
                     break
                     
         if last_turn:
-            clean_last = re.sub(r'^(what|who|where|how|why|is|are|can|could|please)\b', '', last_turn.strip(), flags=re.I).strip(" ?.")
+            clean_last = re.sub(r'^(what|who|where|how|why|is|are|can|could|please)\s+(is|are|was|were|the|a|an)?\b', '', last_turn.strip(), flags=re.I).strip(" ?.")
+            if not clean_last:
+                clean_last = last_turn.strip(" ?.")
             condensed = f"{clean_last}: {query.strip()}"
             logger.info(f"[DECISION ENGINE] Condensed follow-up query: '{query}' -> '{condensed}'")
             return condensed

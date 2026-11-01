@@ -128,6 +128,9 @@ function Chat() {
             const data = JSON.parse(line);
             if (data.type === 'status') {
               setThinkingStatus(data.message);
+            } else if (data.type === 'token') {
+              finalAnswer += data.token;
+              setMessages([...newMessages, { sender: 'Assistant', text: finalAnswer }]);
             } else if (data.type === 'answer') {
               finalAnswer = data.message;
             }
