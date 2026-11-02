@@ -193,6 +193,16 @@ fi
 # ------------------------------------------------------------------------------
 echo -e "\n${BOLD}${BLUE}[4/6] Provisioning Dependencies for Hosting Platform...${NC}"
 
+# Compile Frontend if Node is installed and dist is missing
+if [ "$HAS_NODE" = true ] && [ -d "${FRONTEND_DIR}" ] && [ ! -d "${FRONTEND_DIR}/dist" ]; then
+    echo -e "  ${BLUE}[BUILD] Compiling React Vite Production Frontend to dist/...${NC}"
+    cd "${FRONTEND_DIR}"
+    npm install
+    npm run build
+    echo -e "  ${GREEN}✓${NC} Frontend compiled successfully."
+    cd "${PROJECT_DIR}"
+fi
+
 DEPLOY_MODE=""
 for arg in "$@"; do
     if [ "$arg" == "--docker" ]; then DEPLOY_MODE="docker"; fi
